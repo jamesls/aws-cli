@@ -1,0 +1,13 @@
+  $ export AWS_DEFAULT_REGION=us-east-1
+  $ aws s3 create-bucket --bucket awsclitest1 2>&1 > /dev/null
+  [1]
+
+Give it time to propogate
+
+  $ sleep 5
+
+  $ aws s3 list-buckets | jq '.ListAllMyBucketsResult.Buckets[].Name' | grep awsclitest1
+  *awsclitest1* (glob)
+
+  $ aws s3 delete-bucket --bucket awsclitest1 2>&1 > /dev/null
+  [1]
