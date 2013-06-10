@@ -260,6 +260,7 @@ class TestAWSCommand(BaseAWSCommandParamsTest):
         driver.main('ec2 describe-instances --region us-west-2'.split())
         host = self.last_request_headers()['Host']
         self.assertEqual(host, 'ec2.us-west-2.amazonaws.com')
+        self.fail("PURPOSEFULLY FAILING")
 
 
 if __name__ == '__main__':
