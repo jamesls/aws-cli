@@ -22,8 +22,10 @@ import httpretty
 import awscli
 from awscli.clidriver import CLIDriver
 from awscli.clidriver import create_clidriver
+from awscli.clidriver import BuiltInArgument
 from botocore.hooks import HierarchicalEmitter
 from botocore.base import get_search_path
+from botocore.provider import Provider
 
 
 GET_DATA = {
@@ -31,15 +33,11 @@ GET_DATA = {
         'description': 'description',
         'synopsis': 'usage: foo',
         'options': {
-            "service_name": {
-                "choices": "{provider}/_services",
-                "metavar": "service_name"
-            },
-            "--debug": {
+            "debug": {
                 "action": "store_true",
                 "help": "Turn on debug logging"
             },
-            "--output": {
+            "output": {
                 "choices": [
                     "json",
                     "text",
@@ -47,23 +45,23 @@ GET_DATA = {
                 ],
                 "metavar": "output_format"
             },
-            "--profile": {
+            "profile": {
                 "help": "Use a specific profile from your credential file",
                 "metavar": "profile_name"
             },
-            "--region": {
+            "region": {
                 "choices": "{provider}/_regions",
                 "metavar": "region_name"
             },
-            "--endpoint-url": {
+            "endpoint-url": {
                 "help": "Override service's default URL with the given URL",
                 "metavar": "endpoint_url"
             },
-            "--no-verify-ssl": {
+            "no-verify-ssl": {
                 "action": "store_true",
                 "help": "Override default behavior of verifying SSL certificates"
             },
-            "--no-paginate": {
+            "no-paginate": {
                 "action": "store_false",
                 "help": "Disable automatic pagination",
                 "dest": "paginate"
@@ -86,6 +84,7 @@ class FakeSession(object):
         if emitter is None:
             emitter = HierarchicalEmitter()
         self.emitter = emitter
+        self.provider = Provider(self, 'aws')
 
     def register(self, event_name, handler):
         self.emitter.register(event_name, handler)
@@ -273,10 +272,11 @@ class TestAWSCommand(BaseAWSCommandParamsTest):
         host = self.last_request_headers()['Host']
         self.assertEqual(host, 'ec2.us-west-2.amazonaws.com')
 
-    def test_event_emission_for_top_level_params(self):
-        def inject_new_param(cli_data, **kwargs):
-            cli_data['options']['--unknown-arg'] = {}
+    def inject_new_param(self, argument_table, **kwargs):
+        argument = BuiltInArgument('unknown-arg', {})
+        argument.add_to_arg_table(argument_table)
 
+    def test_event_emission_for_top_level_params(self):
         driver = create_clidriver()
         # --unknown-foo is an known arg, so we expect a 255 rc.
         rc = driver.main('ec2 describe-instances --unknown-arg foo'.split())
@@ -284,7 +284,7 @@ class TestAWSCommand(BaseAWSCommandParamsTest):
         self.assertIn('Unknown options: --unknown-arg', self.stderr.getvalue())
 
         driver.session.register(
-            'building-top-level-params', inject_new_param)
+            'building-top-level-params', self.inject_new_param)
         driver.session.register(
             'top-level-args-parsed',
             lambda parsed_args, **kwargs: args_seen.append(parsed_args))
@@ -297,6 +297,14 @@ class TestAWSCommand(BaseAWSCommandParamsTest):
         self.assertEqual(rc, 0)
         self.assertEqual(len(args_seen), 1)
         self.assertEqual(args_seen[0].unknown_arg, 'foo')
+
+    def test_empty_params_gracefully_handled(self):
+        driver = create_clidriver()
+        # Simulates the equivalent in bash: --identifies ""
+        cmd = 'ses get-identity-dkim-attributes --identities'.split()
+        cmd.append('')
+        rc = driver.main(cmd)
+        self.assertEqual(rc, 0)
 
 
 if __name__ == '__main__':
