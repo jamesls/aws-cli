@@ -56,6 +56,7 @@ if 'py2exe' in sys.argv:
             'includes': ['ConfigParser', 'urllib', 'httplib',
                          'docutils.readers.standalone',
                          'docutils.parsers.rst',
+                         'docutils.parsers.rst.directives.admonitions',
                          'docutils.languages.en',
                          'xml.etree.ElementTree', 'HTMLParser',
                          'awscli.handlers'],
