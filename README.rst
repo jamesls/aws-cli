@@ -178,7 +178,8 @@ To include it in your config file::
     [default]
     aws_access_key_id=<default access key>
     aws_secret_access_key=<default secret key>
-    region=us-west-1  # This will be used as the default
+    # This will be used as the default region.
+    region=us-west-1
 
 Similarly, the ``profile`` variable can be used to specify which profile to use
 if one is not explicitly specified on the command line via the
