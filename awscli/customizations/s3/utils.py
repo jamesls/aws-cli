@@ -11,6 +11,7 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 from datetime import datetime
+import logging
 import mimetypes
 import hashlib
 import math
@@ -23,6 +24,9 @@ from dateutil.tz import tzlocal
 
 from awscli.customizations.s3.constants import QUEUE_TIMEOUT_WAIT, \
     MAX_PARTS, MAX_SINGLE_UPLOAD_SIZE
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MD5Error(Exception):
@@ -115,9 +119,11 @@ def operate(service, cmd, kwargs):
     service, name of the command, and any additional parameters required in
     the call.
     """
+    LOGGER.debug("== Calling: %s, %s", service, cmd)
     operation = service.get_operation(cmd)
     http_response, response_data = operation.call(**kwargs)
     check_error(response_data)
+    LOGGER.debug("== Done with %s, %s", service, cmd)
     return response_data, http_response
 
 

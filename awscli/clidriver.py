@@ -200,8 +200,12 @@ class CLIDriver(object):
             # Unfortunately, by setting debug mode here, we miss out
             # on all of the debug events prior to this such as the
             # loading of plugins, etc.
-            self.session.set_debug_logger(logger_name='botocore')
-            self.session.set_debug_logger(logger_name='awscli')
+            #self.session.set_debug_logger(logger_name='botocore')
+            #self.session.set_debug_logger(logger_name='awscli')
+            format_string = '%(asctime)s - %(threadName)s - %(name)s - %(levelname)s - %(message)s'
+            self.session.set_stream_logger(logger_name='awscli', log_level=logging.DEBUG,
+                                           format_string=format_string)
+
         else:
             self.session.set_stream_logger(logger_name='awscli', log_level='ERROR')
 
