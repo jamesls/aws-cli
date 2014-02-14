@@ -344,6 +344,7 @@ class ServiceCommand(CLICommand):
                 service_object=service_object)
         self.session.emit('building-command-table.%s' % self._name,
                           command_table=command_table,
+                          name=self._name,
                           session=self.session)
         return command_table
 
