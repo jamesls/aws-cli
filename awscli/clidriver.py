@@ -20,6 +20,8 @@ from botocore import xform_name
 from botocore.compat import copy_kwargs, OrderedDict
 from botocore.exceptions import NoCredentialsError
 from botocore.exceptions import NoRegionError
+from botocore.vendored.requests import ConnectionError
+
 
 from awscli import EnvironmentVariables, __version__
 from awscli.formatter import get_formatter
@@ -207,12 +209,33 @@ class CLIDriver(object):
                    '"aws configure".' % e)
             self._show_error(msg)
             return 255
+        except ConnectionError as e:
+            if self._looks_like_dns_error(e):
+                msg = ('Could not connect to host.  Please verify '
+                       'that your region name is correct.')
+                # TODO: would need to get the region name printed here to
+                # be helpful.
+                self._show_error(msg)
+            else:
+                self._show_error(str(e))
+            return 255
         except Exception as e:
             LOG.debug("Exception caught in main()", exc_info=True)
             LOG.debug("Exiting with rc 255")
             sys.stderr.write("\n")
             sys.stderr.write("%s\n" % e)
             return 255
+
+    def _looks_like_dns_error(self, e):
+        # We don't have the ability to introspect the exception type,
+        # so the best we can do is look at the error message string
+        # and see if it looks like a DNS lookup error.
+        error_message = str(e)
+        is_dns_error = (
+            'socket.gaierror' in error_message and
+            'Max retries exceeded with url' in error_message
+        )
+        return is_dns_error
 
     def _show_error(self, msg):
         LOG.debug(msg, exc_info=True)
