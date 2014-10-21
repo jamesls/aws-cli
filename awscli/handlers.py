@@ -47,6 +47,9 @@ from awscli.customizations.cloudsearch import initialize as cloudsearch_init
 from awscli.customizations.emr.emr import emr_initialize
 from awscli.customizations.cloudsearchdomain import register_cloudsearchdomain
 from awscli.customizations.s3endpoint import register_s3_endpoint
+from awscli.customizations.cliinputjson import register_cli_input_json
+from awscli.customizations.generatecliskeleton import \
+    register_generate_cli_skeleton
 
 
 def awscli_initialize(event_handlers):
@@ -96,3 +99,5 @@ def awscli_initialize(event_handlers):
     emr_initialize(event_handlers)
     register_cloudsearchdomain(event_handlers)
     register_s3_endpoint(event_handlers)
+    register_generate_cli_skeleton(event_handlers)
+    register_cli_input_json(event_handlers)
