@@ -1,0 +1,63 @@
+#!/usr/bin/env python
+"""Generate a changelog file."""
+import os
+import sys
+import json
+import argparse
+
+
+ROOTDIR = os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))
+CHANGEDIR = os.path.join(ROOTDIR, '.changes')
+
+
+def sorted_releases(changedir):
+    def key(filename):
+        filename = filename[:-len('.json')]
+        parts = tuple(int(i) for i in filename.split('.'))
+        return parts
+    releases = sorted(os.listdir(changedir), key=key, reverse=True)
+    return releases
+
+
+def _generate_single_release_rst(release_identifier, data, contents):
+    contents.append(release_identifier)
+    contents.append('=' * len(release_identifier))
+    contents.append('')
+    for change in data:
+        line = '* %s:%s: %s' % (change['type'], change['category'],
+                                change['description'])
+        contents.append(line)
+    contents.append('')
+    contents.append('')
+
+
+def generate_rst_changelog(args, changedir=CHANGEDIR):
+    if not os.path.isdir(changedir):
+        sys.stderr.write("Changedir does not exist: %s\n" % changedir)
+        return
+    contents = []
+    for release_filename in sorted_releases(changedir):
+        with open(os.path.join(changedir, release_filename)) as f:
+            data = json.load(f)
+        release_identifier = release_filename[:-len('.json')]
+        _generate_single_release_rst(release_identifier, data, contents)
+    sys.stdout.write('\n'.join(contents).encode("utf-8"))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--format', default='rst',
+                        dest='output_format',
+                        choices=('rst', 'single-html'),
+                        help=('The output format to generate.  By '
+                              'default this is rst (CHANGELOG.rst)'))
+    args = parser.parse_args()
+    if args.output_format == 'rst':
+        generate_rst_changelog(args)
+    elif args.output_format == 'single-html':
+        generate_html_snippet_changelog(args)
+
+
+if __name__ == '__main__':
+    main()
