@@ -14,9 +14,14 @@ import logging
 
 from botocore.hooks import HierarchicalEmitter
 
+
 log = logging.getLogger('awscli.plugin')
 
-BUILTIN_PLUGINS = {'__builtin__': 'awscli.handlers'}
+
+BUILTIN_PLUGINS = {
+    '__builtin__': 'awscli.handlers',
+    'paidia': 'awscli.customizations.paidia.handlers',
+}
 
 
 def load_plugins(plugin_mapping, event_hooks=None, include_builtins=True):
