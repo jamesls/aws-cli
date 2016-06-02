@@ -28,7 +28,7 @@ class WebConsoleCommand(BasicCommand):
     def _run_main(self, parsed_args, parsed_globals):
         sts = self._session.create_client('sts')
         creds = self._session.get_credentials()
-        if creds.token is None or not creds.method.starstwith('assume-'):
+        if creds.token is None or not creds.method.startswith('assume-'):
             sys.stderr.write("Can only open a web-console from a profile "
                              "that assumes a role.")
             return
