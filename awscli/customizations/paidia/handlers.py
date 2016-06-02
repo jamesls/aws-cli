@@ -5,7 +5,8 @@ and not intended for general use.  This is a proving ground for
 feature that could end up back in the original AWS CLI.
 
 """
+from awscli.customizations.paidia import configure
 
 
 def awscli_initialize(event_handlers):
-    pass
+    configure.register(event_handlers)
