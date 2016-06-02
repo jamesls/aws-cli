@@ -6,7 +6,9 @@ feature that could end up back in the original AWS CLI.
 
 """
 from awscli.customizations.paidia import configure
+from awscli.customizations.paidia import login
 
 
 def awscli_initialize(event_handlers):
     configure.register(event_handlers)
+    login.register(event_handlers)
