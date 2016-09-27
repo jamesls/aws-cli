@@ -31,7 +31,7 @@ from awscli.customizations.s3.s3handler import S3Handler
 from awscli.customizations.s3.s3handler import S3TransferHandlerFactory
 from awscli.customizations.s3.utils import find_bucket_key, uni_print, \
     AppendFilter, find_dest_path_comp_key, human_readable_size, \
-    RequestParamsMapper, split_s3_bucket_key
+    RequestParamsMapper, split_s3_bucket_key, LocklessQueue
 from awscli.customizations.s3.syncstrategy.base import MissingFileSync, \
     SizeAndLastModifiedSync, NeverSync
 from awscli.customizations.s3 import transferconfig
@@ -937,6 +937,7 @@ class CommandArchitecture(object):
             'rb': 'remove_bucket'
         }
         result_queue = queue.Queue()
+        result_queue = LocklessQueue()
         operation_name = cmd_translation[paths_type][self.cmd]
 
         fgen_kwargs = {

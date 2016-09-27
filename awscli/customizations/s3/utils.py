@@ -889,3 +889,19 @@ class NonSeekableStream(object):
             return self._fileobj.read()
         else:
             return self._fileobj.read(amt)
+
+
+class LocklessQueue(object):
+    def __init__(self):
+        self._deque = deque()
+
+    def put(self, item):
+        self._deque.append(item)
+
+    def get(self, block=True):
+        while True:
+            try:
+                item = self._deque.popleft()
+                return item
+            except IndexError:
+                time.sleep(0.01)
