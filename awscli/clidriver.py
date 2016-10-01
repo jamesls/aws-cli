@@ -15,6 +15,7 @@ import signal
 import logging
 
 import botocore.session
+from botocore import insight
 from botocore import __version__ as botocore_version
 from botocore.hooks import HierarchicalEmitter
 from botocore import xform_name
@@ -53,6 +54,7 @@ def main():
 def create_clidriver():
     emitter = HierarchicalEmitter()
     session = botocore.session.Session(EnvironmentVariables, emitter)
+    insight.register_session(session)
     _set_user_agent_for_session(session)
     load_plugins(session.full_config.get('plugins', {}),
                  event_hooks=emitter)
