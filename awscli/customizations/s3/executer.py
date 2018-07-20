@@ -105,19 +105,28 @@ class Worker(threading.Thread):
         while True:
             try:
                 function = self.queue.get(True, self.timeout)
+                LOGGER.critical("QUEUE-GET")
                 with self.multi_lock:
                     putback = self.check_multi(function)
                 if not putback:
+                    msg = 'QUEUE-INVOKE-START'
+                    if isinstance(function, BasicTask):
+                        if getattr(function.filename, 'is_multi', False):
+                            msg = 'QUEUE-INVOKE-MULTI-START'
                     try:
+                        LOGGER.critical(msg)
                         function()
+                        LOGGER.critical("QUEUE-INVOKE-END")
                     except Exception as e:
                         LOGGER.debug('%s' % str(e))
                 else:
                     self.queue.put(function)
+                    LOGGER.critical("QUEUE-PUTBACK")
                 if self.is_multi_start:
                     with self.multi_lock:
                         self.multi_counter.count -= 1
                 self.queue.task_done()
+                LOGGER.critical("QUEUE-GET-DONE")
             except Queue.Empty:
                 pass
             if self.done.isSet():
