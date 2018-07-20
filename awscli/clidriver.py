@@ -203,7 +203,13 @@ class CLIDriver(object):
             self.session.set_debug_logger(logger_name='botocore')
             self.session.set_debug_logger(logger_name='awscli')
         else:
-            self.session.set_stream_logger(logger_name='awscli', log_level='ERROR')
+            log_format = (
+                '%(asctime)s - %(threadName)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            self.session.set_stream_logger(
+                logger_name='awscli', log_level='ERROR',
+                format_string=log_format
+            )
 
 
 class CLICommand(object):
