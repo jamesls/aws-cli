@@ -40,6 +40,7 @@ setup_options = dict(
     url='http://aws.amazon.com/cli/',
     scripts=['bin/aws', 'bin/aws.cmd',
              'bin/aws_completer', 'bin/aws_zsh_completer.sh',
+             'bin/aws_resource_completer',
              'bin/aws_bash_completer'],
     packages=find_packages(exclude=['tests*']),
     package_data={'awscli': ['data/*.json', 'examples/*/*.rst',

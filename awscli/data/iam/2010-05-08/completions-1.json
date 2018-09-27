@@ -1,0 +1,60 @@
+{
+  "operations": {
+    "RemoveUserFromGroup": {
+      "GroupName": {
+        "completions": [{
+          "parameters": {
+            "UserName": "UserName"
+	  },
+	  "resourceName": "UserInGroups",
+	  "resourceIdentifier": "Name"
+	}, {
+	  "parameters": {},
+	  "resourceName": "Group",
+	  "resourceIdentifier": "Name"
+	}]
+      },
+      "UserName": {
+        "completions": [{
+          "parameters": {
+            "GroupName": "GroupName"
+	  },
+	  "resourceName": "UsersOfGroup",
+	  "resourceIdentifier": "Name"
+	}, {
+	  "parameters": {},
+	  "resourceName": "Users",
+	  "resourceIdentifier": "Name"
+	}]
+      }
+    }
+  }, 
+  "resources": {
+    "Group": {
+      "operation": "ListGroups", 
+      "resourceIdentifier": {
+        "Name": "Groups[].GroupName"
+      }
+    }, 
+    "UsersOfGroup": {
+      "operation": "GetGroup", 
+      "inputParameters": ["GroupName"],
+      "resourceIdentifier": {
+        "Name": "Users[].UserName"
+      }
+    }, 
+    "UserInGroups": {
+      "operation": "ListGroupsForUser",
+      "inputParameters": ["UserName"],
+      "resourceIdentifier": {
+        "Name": "Groups[].GroupName"
+      }
+    },
+    "User": {
+      "operation": "ListUsers", 
+      "resourceIdentifier": {
+        "Name": "Users[].UserName"
+      }
+    }
+  }
+}

@@ -1,0 +1,231 @@
+#!/usr/bin/env python
+# Copyright 2012 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+# Licensed under the Apache License, Version 2.0 (the "License"). You
+# may not use this file except in compliance with the License. A copy of
+# the License is located at
+
+#     http://aws.amazon.com/apache2.0/
+
+# or in the "license" file accompanying this file. This file is
+# distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
+# ANY KIND, either express or implied. See the License for the specific
+# language governing permissions and limitations under the License.
+import os
+import sys
+from itertools import tee
+import jmespath
+
+
+# XXX: Not a fan of this, this is taken from awscli/__init__.py
+_awscli_data_path = []
+if 'AWS_DATA_PATH' in os.environ:
+    for path in os.environ['AWS_DATA_PATH'].split(os.pathsep):
+        path = os.path.expandvars(path)
+        path = os.path.expanduser(path)
+        _awscli_data_path.append(path)
+_awscli_data_path.append(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                 'awscli', 'data'))
+os.environ['AWS_DATA_PATH'] = os.pathsep.join(_awscli_data_path)
+
+
+def get_completion_input():
+    # bash exports COMP_LINE and COMP_POINT, tcsh COMMAND_LINE only
+    comp_line = (
+        os.environ.get('COMP_LINE') or os.environ.get('COMMAND_LINE') or ''
+    )
+    comp_point = int(os.environ.get('COMP_POINT') or len(comp_line))
+    return comp_line, comp_point
+
+
+def camel_case(x):
+    if x.startswith('--'):
+        x = x[2:]
+    if '-' not in x:
+        return x
+    parts = x.split('-')
+    return ''.join([p.title() for p in parts])
+
+def pairwise(iterable):
+    a, b = tee(iterable)
+    next(b, None)
+    return zip(a, b)
+
+def create_completer():
+    import botocore.session
+    session = botocore.session.get_session()
+    return Completer(session, PartialParser())
+
+
+class PartialParser(object):
+    def __init__(self):
+        pass
+
+    def parse_cli_arg(self, comp_line: str, comp_point: int):
+        # We want to be efficient so we try to detect if we can
+        # short circuit and exit.  If we're not auto completing
+        # a resource value we'll return as quickly as possible.
+        index = comp_point
+        if index >= len(comp_line):
+            index -= 1
+        # First find the first non whitespace char.
+        while comp_line[index] == ' ':
+            index -= 1
+        end_index = index
+        # Next find the start of the cli param.
+        # command --foo-bar
+        #        ^--here
+        while comp_line[index] != ' ':
+            index -= 1
+        start_index = index
+        last_arg_from_cursor = comp_line[start_index+1:end_index+1]
+        sys.stderr.write(f"\nstart: {start_index}, end: {end_index}, current arg: {repr(last_arg_from_cursor)}\n")
+        if not last_arg_from_cursor.startswith('--'):
+            return ParsedResult(on_arg_value=False)
+        # This is just POC code.  This is not sufficient to properly parse
+        # an AWS CLI command.
+        parts = comp_line.split()
+        if not len(parts) > 3:
+            sys.stderr.write(f"\nNot enough info for autocompleting\n")
+            return ParsedResult(on_arg_value=False)
+        service = parts[1]
+        operation = camel_case(parts[2])
+        param = camel_case(last_arg_from_cursor)
+        # Definitely incorrect parsing that's just here for the POC.
+        # This is assuming --foo bar --baz qux, etc.
+        remaining_args = {}
+        for arg, value in pairwise(parts[3:]):
+            if not arg.startswith('--'):
+                continue
+            name = camel_case(arg)
+            if name != param:
+                remaining_args[name] = value
+        return ParsedResult(service=service,
+                            operation=operation,
+                            param=param,
+                            remaining_params=remaining_args,
+                            on_arg_value=True)
+
+
+class ParsedResult(object):
+    def __init__(self, service=None, operation=None, param=None,
+                 remaining_params=None,
+                 on_arg_value=False):
+        self.service = service
+        self.operation = operation
+        self.param = param
+        self.remaining_params = remaining_params
+        self.on_arg_value = on_arg_value
+
+    def __repr__(self):
+        return f"ParsedResult({self.service}, {self.operation}, {self.param}, {self.remaining_params})"
+
+
+class Completer(object):
+    def __init__(self, session, parser):
+        self.session = session
+        self.parser = parser
+
+    def complete(self, comp_line, comp_point):
+        sys.stderr.write(
+            f"\ncomp_line: {comp_line}, comp_point: {comp_point}\n")
+        result = self.parser.parse_cli_arg(comp_line, comp_point)
+        if not result.on_arg_value:
+            # This parser is only for auto completing resource values.
+            # If we're not completing resource values we can immediately
+            # return.
+            sys.stderr.write("Not on arg value, returning.\n")
+            return
+        sys.stderr.write(f"\nReceived parsed result: {result}\n")
+        completion_data = self._load_competion_data(result)
+        if completion_data is None:
+            sys.stderr.write(f"\nNo completion JSON, returning.\n")
+        sys.stderr.write(f"\nLoaded completion data\n")
+        return self._retrieve_completion_results(completion_data, result)
+
+    def _load_competion_data(self, parsed):
+        loader = self.session.get_component('data_loader')
+        return loader.load_service_model(parsed.service, 'completions-1')
+
+    def _retrieve_completion_results(self, data, parsed):
+        operation = parsed.operation
+        completion_data = data['operations'].get(operation, {}).get(
+            parsed.param, {})
+        if not completion_data:
+            sys.stderr.write("\nNo completion data in JSON found.\n")
+            return
+        # Making an assumption that this is ordered from most specific to
+        # least specific, i.e the entries with the most parameters come first.
+        # Not sure if that's part of the spec or if we just always pre-process
+        # it to be safe.
+        matched_data = None
+        for completion in completion_data['completions']:
+            required_params = completion['parameters']
+            if all(k in parsed.remaining_params for k in required_params):
+                matched_data = completion
+                break
+            elif not required_params:
+                sys.stderr.write(f"\nMatched with empty params dict\n")
+                match_data = completion
+                break
+        if matched_data is None:
+            sys.stderr.write(f"\nFound no matched data in completion info.\n")
+        sys.stderr.write(f"\nMatched data: {matched_data}\n")
+
+
+        resource = data['resources'][matched_data['resourceName']]
+        sys.stderr.write(f"\n{resource}\n")
+        identifier = resource['resourceIdentifier'][
+            matched_data['resourceIdentifier']]
+        operation = resource['operation']
+        sys.stderr.write(f"\n{operation} -> {identifier}\n")
+        input_args = {}
+        for k, v in matched_data['parameters'].items():
+            param_value = parsed.remaining_params[k]
+            input_args[v] = param_value
+        return self._make_api_call(parsed.service, operation, identifier,
+                                   input_args)
+
+    def _make_api_call(self, service_name, operation_name, jp_expression,
+                       input_args):
+        client = self.session.create_client(service_name)
+        py_name = None
+        for k, v in client.meta.method_to_api_mapping.items():
+            if v == operation_name:
+                py_name = k
+                break
+        sys.stderr.write(
+            f"\nMaking api call {py_name} with args {input_args}\n")
+        response = getattr(client, py_name)(**input_args)
+        result = jmespath.search(jp_expression, response)
+        sys.stderr.write(f"\nAPI result: {result}\n")
+        return result
+
+
+def display_completions(completions):
+    if completions:
+        output = '\n'.join(completions)
+        sys.stderr.write(f'\nPRINTING RESULTS: {output}\n')
+        sys.stdout.write(output)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
+def main():
+    import io
+    #sys.stderr = io.StringIO()
+    try:
+        comp_line, comp_point = get_completion_input()
+        completer = create_completer()
+        completions = completer.complete(comp_line, comp_point)
+        if completions:
+            display_completions(completions)
+    except KeyboardInterrupt:
+        # If the user hits Ctrl+C, we don't want to print
+        # a traceback to the user.
+        pass
+
+
+if __name__ == '__main__':
+    main()
