@@ -45,8 +45,11 @@ class TestFileCompleter(unittest.TestCase):
         self.touch_file('baz.txt')
 
         completions = self.get_completions_given_user_input(u'./b')
+        normpath = os.path.normpath
         self.assertEqual(
-            [c.text for c in completions], ['./bar.txt', './baz.txt'])
+            [c.text for c in completions],
+            [normpath('./bar.txt'), normpath('./baz.txt')]
+        )
 
     def test_full_path_included_if_full_path_used_as_text(self):
         self.touch_file('foo.txt')
