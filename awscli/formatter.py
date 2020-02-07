@@ -17,6 +17,8 @@ from botocore.compat import json
 from botocore.utils import set_value_from_jmespath
 from botocore.paginate import PageIterator
 from ruamel.yaml import YAML
+import dicttoxml
+from xml.dom.minidom import parseString
 
 from awscli.table import MultiTable, Styler, ColorizedStyler
 from awscli import text
@@ -362,14 +364,29 @@ class TextFormatter(Formatter):
         text.format_text(response, stream)
 
 
+class XMLFormatter(FullyBufferedFormatter):
+
+    def _format_response(self, command_name, response, stream):
+        # For operations that have no response body (e.g. s3 put-object)
+        # the response will be an empty string.  We don't want to print
+        # that out to the user but other "falsey" values like an empty
+        # dictionary should be printed.
+        if response != {}:
+            dom = parseString(dicttoxml.dicttoxml(
+                response, attr_type=False, custom_root='response'))
+            xml = dom.toprettyxml()
+            stream.write(xml)
+            stream.write('\n')
+
+
 CLI_OUTPUT_FORMATS = {
     'json': JSONFormatter,
     'text': TextFormatter,
     'table': TableFormatter,
     'yaml': YAMLFormatter,
     'yaml-stream': StreamedYAMLFormatter,
+    'for-real-xml': XMLFormatter,
 }
-
 
 def get_formatter(format_type, args):
     if format_type not in CLI_OUTPUT_FORMATS:
