@@ -49,6 +49,11 @@ class BaseLogEventsFormatter(object):
         return log.rstrip() + '\n'
 
 
+class MessageOnlyLogEventsFormatter(BaseLogEventsFormatter):
+    def display_log_event(self, log_event):
+        self._write_log_event(log_event['message'])
+
+
 class ShortLogEventsFormatter(BaseLogEventsFormatter):
     def display_log_event(self, log_event):
         log_event = '%s %s' % (
@@ -128,7 +133,7 @@ class TailCommand(BasicCommand):
         {
             'name': 'format',
             'default': 'detailed',
-            'choices': ['detailed', 'short'],
+            'choices': ['detailed', 'short', 'message-only'],
             'help_text': (
                 'The format to display the logs. The following formats are '
                 'supported:\n\n'
@@ -139,6 +144,8 @@ class TailCommand(BasicCommand):
                 '</li>'
                 '<li> short - A shortened format. It prints out the '
                 'a shortened timestamp and the log message.'
+                '</li>'
+                '<li> message-only - Only displays the log message.'
                 '</li>'
                 '</ul>'
             )
@@ -176,7 +183,8 @@ class TailCommand(BasicCommand):
     ]
     _FORMAT_TO_FORMATTER_CLS = {
         'detailed': DetailedLogEventsFormatter,
-        'short': ShortLogEventsFormatter
+        'short': ShortLogEventsFormatter,
+        'message-only': MessageOnlyLogEventsFormatter
     }
 
     def _run_main(self, parsed_args, parsed_globals):
