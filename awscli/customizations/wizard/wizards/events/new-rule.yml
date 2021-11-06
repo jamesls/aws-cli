@@ -46,10 +46,21 @@ plan:
             actual_value: s3
         details:
           value: event_pattern_value
+          output: json
           description: "Event pattern"
-      event_pattern_value:
+      event_pattern_source:
         type: template
-        value: "{{\"source\": [\"aws.{service_for_event_pattern}\"]}}"
+        value: "aws.{service_for_event_pattern}"
+      event_pattern_value:
+        type: define-variable
+        value:
+          source:
+            - "{event_pattern_source}"
+      event_pattern_as_json:
+        type: dump-data
+        dump_type: json
+        value: "{event_pattern_value}"
+
       # Schedule related prompts
       schedule_type:
         condition:
@@ -272,7 +283,7 @@ plan:
             --schedule-expression '{schedule_expression}' \
             {% endif %}
             {%if {pattern_type} == event_pattern %}
-            --event-pattern '{event_pattern_value}' \
+            --event-pattern '{event_pattern_as_json}' \
             {% endif %}
             --query RuleArn --output text{% if {target_type} == lambda_function %})
             {% endif %}
@@ -316,57 +327,73 @@ plan:
           aws events put-targets \
             --rule '{rule_name}' \
             --targets 'Id=cli-wizard-0,Arn={target_arn}{% if {target_needs_role} == yes %},RoleArn={target_role_arn}{% endif %}'
-
       preview_cfn_template_value:
-        type: template
-        value: |
+        type: dump-data
+        dump_type: yaml
+        value: "{cfn_template}"
+      cfn_template:
+        type: define-variable
+        value:
           Resources:
-            {rule_name}:
+            "{rule_name}":
               Type: AWS::Events::Rule
               Properties:
-                Name: {rule_name}
-                Description: {rule_description}
-                {%if {pattern_type} == schedule %}
-                ScheduleExpression: {schedule_expression}
-                {% endif %}
-                {%if {pattern_type} == event_pattern %}
+                Name: "{rule_name}"
+                Description: "{rule_description}"
+                ScheduleExpression:
+                  __wizard__:Condition:
+                    condition:
+                      variable: pattern_type
+                      equals: schedule
+                    value: "{schedule_expression}"
                 EventPattern:
-                  source:
-                    - aws.{service_for_event_pattern}
-                {% endif %}
+                  __wizard__:Condition:
+                    condition:
+                      variable: pattern_type
+                      equals: event_pattern
+                    value: "{event_pattern_value}"
                 Targets:
                   - Id: cli-wizard-0
-                    Arn: {target_arn}
-                    {% if {target_needs_role} == yes %}
-                    RoleArn: {target_role_arn}
-                    {% endif %}
-            {% if {target_type} == lambda_function %}
-            LambdaPermission:
-              Type: AWS::Lambda::Permission
-              Properties:
-                Action: lambda:InvokeFunction
-                FunctionName: {lambda_function_target}
-                Principal: events.amazonaws.com
-                SourceArn:
-                  Fn::GetAtt:
-                    - {rule_name}
-                    - Arn
-            {% endif %}
-            {% if {target_type} == sns_topic %}
-            SNSTopicPolcy:
-              Type: AWS::SNS::TopicPolicy
-              Properties:
-                PolicyDocument:
-                  Version: 2012-10-17
-                  Statement:
-                    - Effect: Allow
-                      Action: sns:Publish
-                      Principal:
-                        Service: events.amazonaws.com
-                      Resource: {sns_topic_target}
-                Topics:
-                  - {sns_topic_target}
-            {% endif %}
+                    Arn: "{target_arn}"
+                    RoleArn:
+                      __wizard__:Condition:
+                        condition:
+                          variable: target_needs_role
+                          equals: yes
+                        value: "{target_role_arn}"
+              LambdaPermission:
+                __wizard__:Condition:
+                  condition:
+                    variable: target_type
+                    equals: lambda_function
+                  value:
+                    Type: AWS::Lambda::Permission
+                    Properties:
+                      Action: lambda:InvokeFunction
+                      FunctionName: "{lambda_function_target}"
+                      Principal: events.amazonaws.com
+                      SourceArn:
+                        Fn::GetAtt:
+                          - "{rule_name}"
+                          - Arn
+              SNSTopicPolcy:
+                __wizard__:Condition:
+                  condition:
+                    variable: target_type
+                    equals: sns_topic
+                  value:
+                    Type: AWS::SNS::TopicPolicy
+                    Properties:
+                      PolicyDocument:
+                        Version: 2012-10-17
+                        Statement:
+                          - Effect: Allow
+                            Action: sns:Publish
+                            Principal:
+                              Service: events.amazonaws.com
+                            Resource: "{sns_topic_target}"
+                      Topics:
+                        - "{sns_topic_target}"
 
   __DONE__:
 execute:
@@ -391,7 +418,7 @@ execute:
         equals: event_pattern
       overlays:
         - "{put_rule_params}"
-        - EventPattern: "{event_pattern_value}"
+        - EventPattern: "{event_pattern_as_json}"
     - type: apicall
       operation: events.PutRule
       params: "{put_rule_params}"

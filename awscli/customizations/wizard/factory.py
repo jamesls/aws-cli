@@ -71,6 +71,8 @@ def create_wizard_app(definition, session, output=None, app_input=None):
             core.SharedConfigStep.NAME: core.SharedConfigStep(
                 config_api=shared_config),
             core.TemplateStep.NAME: core.TemplateStep(),
+            core.DefineVariableStep.NAME: core.DefineVariableStep(),
+            core.DumpDataStep.NAME: core.DumpDataStep(),
         },
         exception_handler=layout.error_bar.display_error
     )

@@ -18,6 +18,7 @@ from functools import partial
 
 from botocore import xform_name
 import jmespath
+import ruamel.yaml as yaml
 
 from awscli.utils import json_encoder
 from awscli.customizations.wizard.exceptions import (
@@ -285,6 +286,7 @@ class SharedConfigStep(BaseStep):
 
 class VariableResolver(object):
 
+    _CONDITION_NOT_MET = object()
     _VAR_MATCH = re.compile(r'^{(.*?)}$')
 
     def resolve_variables(self, variables, params):
@@ -310,16 +312,35 @@ class VariableResolver(object):
         elif isinstance(value, list):
             final = []
             for v in value:
+                v = self._resolve_condition(v, plan_vars)
+                if v is self._CONDITION_NOT_MET:
+                    continue
                 final.append(self._resolve_vars(v, plan_vars))
             return final
         elif isinstance(value, dict):
             final = {}
             for k, v in value.items():
+                v = self._resolve_condition(v, plan_vars)
+                if v is self._CONDITION_NOT_MET:
+                    continue
+                k = self._resolve_vars(k, plan_vars)
                 final[k] = self._resolve_vars(v, plan_vars)
             final = self._resolve_functions(final)
             return final
         else:
             return value
+
+    def _resolve_condition(self, value, plan_vars):
+        if len(value) != 1:
+            return value
+        only_key = list(value)[0]
+        if only_key == '__wizard__:Condition':
+            condition = value['__wizard__:Condition']['condition']
+            if ConditionEvaluator().evaluate(condition, plan_vars):
+                return value['__wizard__:Condition']['value']
+            else:
+                return self._CONDITION_NOT_MET
+        return value
 
     def _resolve_functions(self, value):
         if len(value) != 1:
@@ -473,6 +494,11 @@ class ExecutorStep(object):
     def run_step(self, step_definition, parameters):
         raise NotImplementedError("run_step")
 
+    def _store_output_var_if_requested(self, step_definition, parameters,
+                                       value):
+        if 'output_var' in step_definition:
+            parameters[step_definition['output_var']] = value
+
 
 class APICallExecutorStep(ExecutorStep):
 
@@ -490,8 +516,8 @@ class APICallExecutorStep(ExecutorStep):
             optional_api_params=step_definition.get('optional_params'),
             query=step_definition.get('query'),
         )
-        if 'output_var' in step_definition:
-            parameters[step_definition['output_var']] = response
+        self._store_output_var_if_requested(
+            step_definition, parameters, response)
 
 
 class SharedConfigExecutorStep(ExecutorStep):
@@ -557,8 +583,10 @@ class DefineVariableStep(ExecutorStep):
         value = step_definition['value']
         resolved_value = VariableResolver().resolve_variables(
             parameters, value)
-        key = step_definition['varname']
-        parameters[key] = resolved_value
+        if 'varname' in step_definition:
+            key = step_definition['varname']
+            parameters[key] = resolved_value
+        return resolved_value
 
 
 class MergeDictStep(ExecutorStep):
@@ -573,7 +601,9 @@ class MergeDictStep(ExecutorStep):
                 parameters, overlay,
             )
             result = self._deep_merge(result, resolved_overlay)
-        parameters[step_definition['output_var']] = result
+        self._store_output_var_if_requested(
+            step_definition, parameters, result)
+        return result
 
     def _deep_merge(self, original, newvalue):
         if isinstance(newvalue, list) and isinstance(original, list):
@@ -602,9 +632,11 @@ class LoadDataStep(ExecutorStep):
         load_type = step_definition['load_type']
         if load_type == 'json':
             loaded_value = json.loads(value)
-            parameters[step_definition['output_var']] = loaded_value
         else:
             raise ValueError(f'Unsupported load_type: {load_type}')
+        self._store_output_var_if_requested(
+            step_definition, parameters, loaded_value)
+        return loaded_value
 
 
 class DumpDataStep(ExecutorStep):
@@ -618,6 +650,10 @@ class DumpDataStep(ExecutorStep):
         dump_type = step_definition['dump_type']
         if dump_type == 'json':
             dumped_value = json.dumps(value)
-            parameters[step_definition['output_var']] = dumped_value
+        elif dump_type == 'yaml':
+            dumped_value = yaml.dump(value, Dumper=yaml.RoundTripDumper)
         else:
             raise ValueError(f'Unsupported load_type: {dump_type}')
+        self._store_output_var_if_requested(
+            step_definition, parameters, dumped_value)
+        return dumped_value
