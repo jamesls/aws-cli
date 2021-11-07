@@ -24,11 +24,23 @@ plan:
           - display: Schedule
             actual_value: schedule
 
-      # Event pattern related prompts
-      service_for_event_pattern:
+      event_pattern_input_type:
+        type: prompt
         condition:
           variable: pattern_type
           equals: event_pattern
+        description: Select method to choose the event pattern
+        choices:
+          - display: Use pre-defined pattern by service
+            actual_value: predefined
+          - display: Use custom pattern
+            actual_value: custom
+
+      # Event pattern related prompts
+      service_for_event_pattern:
+        condition:
+          variable: event_pattern_input_type
+          equals: predefined
         type: prompt
         description: Select a service to match events for
         choices:
@@ -48,14 +60,42 @@ plan:
           value: event_pattern_value
           output: json
           description: "Event pattern"
-      event_pattern_source:
-        type: template
-        value: "aws.{service_for_event_pattern}"
-      event_pattern_value:
+
+      predefined_event_pattern:
         type: define-variable
         value:
           source:
             - "{event_pattern_source}"
+
+      event_pattern_source:
+        type: template
+        value: "aws.{service_for_event_pattern}"
+
+      custom_event_pattern_filename:
+        condition:
+          variable: event_pattern_input_type
+          equals: custom
+        type: prompt
+        description: Enter the filename with the custom event pattern
+        completer: file_completer
+
+      custom_event_pattern:
+        type: load-data
+        load_type: json
+        value:
+          __wizard__:File:
+            path: "{custom_event_pattern_filename}"
+
+
+      event_pattern_value:
+        type: define-variable
+        case:
+          - condition:
+              variable: event_pattern_input_type
+              equals: custom
+            value: "{custom_event_pattern}"
+          - value: "{predefined_event_pattern}"
+
       event_pattern_as_json:
         type: dump-data
         dump_type: json

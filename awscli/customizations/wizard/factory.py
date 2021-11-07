@@ -73,6 +73,7 @@ def create_wizard_app(definition, session, output=None, app_input=None):
             core.TemplateStep.NAME: core.TemplateStep(),
             core.DefineVariableStep.NAME: core.DefineVariableStep(),
             core.DumpDataStep.NAME: core.DumpDataStep(),
+            core.LoadDataStep.NAME: core.LoadDataStep(),
         },
         exception_handler=layout.error_bar.display_error
     )

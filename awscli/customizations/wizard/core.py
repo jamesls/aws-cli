@@ -580,13 +580,24 @@ class DefineVariableStep(ExecutorStep):
     NAME = 'define-variable'
 
     def run_step(self, step_definition, parameters):
-        value = step_definition['value']
+        value = self._get_value(step_definition, parameters)
         resolved_value = VariableResolver().resolve_variables(
             parameters, value)
         if 'varname' in step_definition:
             key = step_definition['varname']
             parameters[key] = resolved_value
         return resolved_value
+
+    def _get_value(self, step_definition, parameters):
+        if 'case' in step_definition:
+            for case in step_definition['case']:
+                if 'condition' in case:
+                    evaluator = ConditionEvaluator()
+                    if evaluator.evaluate(case['condition'], parameters):
+                        return case['value']
+                else:
+                    return case['value']
+        return step_definition['value']
 
 
 class MergeDictStep(ExecutorStep):
