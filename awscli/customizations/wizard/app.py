@@ -52,6 +52,7 @@ class WizardApp(Application):
             key_bindings = get_default_keybindings()
         self.details_visible = False
         self.error_bar_visible = None
+        self.save_details_visible = False
         super().__init__(
             layout=layout, style=style, key_bindings=key_bindings,
             full_screen=full_screen, output=output, input=app_input,
