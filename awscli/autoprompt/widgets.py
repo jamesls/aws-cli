@@ -124,6 +124,7 @@ class InputHelpView(BaseHelpView):
             f'{self.STYLE}[F3]</style> Hide/Show Docs\n'
             f'{self.STYLE}[F4]</style> One/Multi column prompt\n'
             f'{self.STYLE}[F5]</style> Hide/Show Output\n'
+            f'{self.STYLE}[F6]</style> Copy input to clipboard\n'
             f'{self.STYLE}[CONTROL+R]</style> On/Off bck-i-search'
         )
 
@@ -202,7 +203,8 @@ class InputToolbarView(BaseToolbarView):
             f'{self.STYLE}[F1]</style> Show Shortkey Help{self.SPACING}'
             f'{self.STYLE}[F2]</style> Focus on next panel{self.SPACING}'
             f'{self.STYLE}[F3]</style> Hide/Show Docs{self.SPACING}'
-            f'{self.STYLE}[F5]</style> Hide/Show Output'
+            f'{self.STYLE}[F5]</style> Hide/Show Output{self.SPACING}'
+            f'{self.STYLE}[F6]</style> Copy input to clipboard'
             )
 
 

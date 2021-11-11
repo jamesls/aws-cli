@@ -19,6 +19,7 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.completion import Completer, ThreadedCompleter
 from prompt_toolkit.completion import Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.clipboard.pyperclip import PyperclipClipboard
 
 from awscli.logger import LOG_FORMAT, disable_crt_logging
 from awscli.autocomplete import parser
@@ -119,7 +120,7 @@ class PromptToolkitPrompter:
         kb = kb_manager.keybindings
         app = Application(layout=layout, key_bindings=kb, full_screen=False,
                           output=self._output, erase_when_done=True,
-                          input=self._input)
+                          input=self._input, clipboard=PyperclipClipboard())
         self._set_app_defaults(app)
         return app
 

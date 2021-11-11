@@ -257,6 +257,12 @@ class PromptToolkitKeyBindings:
                 input_buffer = layout.get_buffer_by_name('input_buffer')
                 layout.focus(input_buffer)
 
+        @self._kb.add(Keys.F6)
+        def _(event):
+            input_buffer = event.app.layout.get_buffer_by_name('input_buffer')
+            data = input_buffer.document.text
+            event.app.clipboard.set_text(data)
+
         @self._kb.add(Keys.F1)
         def _(event):
             event.app.show_help = not event.app.show_help
