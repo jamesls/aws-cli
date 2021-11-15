@@ -266,7 +266,14 @@ class PromptToolkitKeyBindings:
             # back here so users will have a complete CLI command they can
             # just paste and run.
             data = f"aws {data}"
-            event.app.clipboard.set_text(data)
+            try:
+                event.app.clipboard.set_text(data)
+            except Exception:
+                # We may not be able to copy clipboard data if they have no
+                # display/GUI (e.g. on a remote headless system).  The best
+                # we can do is fail silently but warn them that we aren't
+                # able to copy this value for them
+                pass
 
         @self._kb.add(Keys.F1)
         def _(event):
