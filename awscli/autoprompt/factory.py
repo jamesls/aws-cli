@@ -261,6 +261,11 @@ class PromptToolkitKeyBindings:
         def _(event):
             input_buffer = event.app.layout.get_buffer_by_name('input_buffer')
             data = input_buffer.document.text
+            # The input_buffer doesn't include the "aws " prefix, that's done
+            # by the BeforeInput input_processor so we have to manually add it
+            # back here so users will have a complete CLI command they can
+            # just paste and run.
+            data = f"aws {data}"
             event.app.clipboard.set_text(data)
 
         @self._kb.add(Keys.F1)
