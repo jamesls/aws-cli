@@ -10,6 +10,7 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
+import os
 import base64
 import logging
 from botocore.httpchecksum import CrtCrc32cChecksum
@@ -147,3 +148,38 @@ class JMESSync(SizeAndLastModifiedSync):
             c = CrtCrc32cChecksum()
             c.update(f.read())
             return c.digest()
+
+
+
+class MerkleTree:
+    def __init__(self, checksum_cls):
+        self._checksum_cls = checksum_cls
+
+    def calculate_tree_hash(self, dirname):
+        hashes = []
+        contents = os.listdir(dirname)
+        for obj in contents:
+            full_path = os.path.join(dirname, obj)
+            if os.path.isfile(full_path):
+                hashes.append(
+                    {'path': full_path,
+                     'checksum': self._compute_local_checksum(full_path)}
+                )
+            elif os.path.isdir(full_path):
+                checksum = self.calculate_tree_hash(full_path)
+                hashes.append(checksum)
+        final = self._checksum_cls()
+        for chunk in hashes:
+            final.update(chunk['checksum'])
+        return {'path': dirname, 'checksum': final.digest()}
+
+    def _compute_local_checksum(self, filename):
+        with open(filename, 'rb') as f:
+            c = self._checksum_cls()
+            c.update(f.read())
+            return c.digest()
+
+
+
+t = MerkleTree(CrtCrc32cChecksum)
+print(t.calculate_tree_hash('.'))
