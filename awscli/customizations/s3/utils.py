@@ -470,12 +470,14 @@ class RequestParamsMapper(object):
         cls._set_sse_request_params(request_params, cli_params)
         cls._set_sse_c_request_params(request_params, cli_params)
         cls._set_request_payer_param(request_params, cli_params)
+        cls._set_checksum_params(request_params, cli_params)
 
     @classmethod
     def map_get_object_params(cls, request_params, cli_params):
         """Map CLI params to GetObject request params"""
         cls._set_sse_c_request_params(request_params, cli_params)
         cls._set_request_payer_param(request_params, cli_params)
+        cls._set_checksum_verify_params(request_params, cli_params)
 
     @classmethod
     def map_get_object_tagging_params(cls, request_params, cli_params):
@@ -539,6 +541,14 @@ class RequestParamsMapper(object):
     def _set_request_payer_param(cls, request_params, cli_params):
         if cli_params.get('request_payer'):
             request_params['RequestPayer'] = cli_params['request_payer']
+
+    @classmethod
+    def _set_checksum_params(cls, request_params, cli_params):
+        request_params['ChecksumAlgorithm'] = 'crc32c'
+
+    @classmethod
+    def _set_checksum_verify_params(cls, request_params, cli_params):
+        request_params['ChecksumMode'] = 'ENABLED'
 
     @classmethod
     def _set_general_object_params(cls, request_params, cli_params):
