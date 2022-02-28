@@ -105,6 +105,8 @@ class JMESSync(SizeAndLastModifiedSync):
         operation = src_file.operation_name
         if operation == 'upload':
             result = self._handle_upload_check(src_file, dest_file)
+        elif operation == 'download':
+            result = self._handle_download_check(src_file, dest_file)
         if result is None:
             LOG.debug(
                 "Missing checksum data, falling back to default "
@@ -119,14 +121,25 @@ class JMESSync(SizeAndLastModifiedSync):
         if dest_file.response_data.get('ChecksumAlgorithm', '') != ['CRC32C']:
             return None
         bucket, key = src_file.dest.split('/', 1)
+        actual_checksum = self._get_remote_checksum(bucket, key)
+        local_checksum = self._compute_local_checksum(src_file.src)
+        return not actual_checksum == local_checksum
+
+    def _get_remote_checksum(self, bucket, key):
         head_object_params = {
             'Bucket': bucket,
             'Key': key,
             'ChecksumMode': 'ENABLED',
         }
         response = self._client.head_object(**head_object_params)
-        actual_checksum = base64.b64decode(response['ChecksumCRC32C'])
-        local_checksum = self._compute_local_checksum(src_file.src)
+        return base64.b64decode(response['ChecksumCRC32C'])
+
+    def _handle_download_check(self, src_file, dest_file):
+        if src_file.response_data.get('ChecksumAlgorithm', '') != ['CRC32C']:
+            return None
+        bucket, key = src_file.src.split('/', 1)
+        actual_checksum = self._get_remote_checksum(bucket, key)
+        local_checksum = self._compute_local_checksum(src_file.dest)
         return not actual_checksum == local_checksum
 
     def _compute_local_checksum(self, filename):
