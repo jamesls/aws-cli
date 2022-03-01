@@ -22,7 +22,7 @@ DEFAULTS = {
     'multipart_threshold': 8 * (1024 ** 2),
     'multipart_chunksize': 8 * (1024 ** 2),
     'max_concurrent_requests': 10,
-    'max_queue_size': 1000,
+    'max_queue_size': 10000,
     'max_bandwidth': None,
     'preferred_transfer_client': constants.DEFAULT_TRANSFER_CLIENT,
     'target_bandwidth': int(5 * (1024 ** 3) / 8),  # which is 5 Gb/s

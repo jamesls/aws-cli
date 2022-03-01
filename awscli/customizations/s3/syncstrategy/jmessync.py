@@ -11,8 +11,10 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 import os
+import time
 import base64
 import logging
+import concurrent.futures
 from botocore.httpchecksum import CrtCrc32cChecksum
 
 from awscli.customizations.s3.syncstrategy.base import SizeAndLastModifiedSync
@@ -26,16 +28,82 @@ JMES_SYNC_ARG = {
     'help_text': 'A fast, content-based syncing algorithm.'}
 
 
+class HeadObjectLister:
+    def __init__(self):
+        # Key: (bucket, key) -> {'checksum': '<crc32c>'}
+        #
+        # If there's no checksum data available (wasn't stored with CRC32c)
+        # then we set the checksum value to None to indicate that we've already
+        # processed the key.
+        # Key: (bucket, key) -> {'checksum': None}
+        self._cache = {}
+        self._client = None
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
+        self._stats = {'hits': 0, 'misses': 0}
+        self._needs_primer_hack = True
+
+    def set_client(self, client):
+        self._client = client
+
+    # Hook this method up to after-call.s3.ListObjects
+    # so we can start queueing head object requests as soon
+    # as we get a new set of objects.
+    def on_list_objects_response(self, parsed, **kwargs):
+        contents = parsed.get('Contents', [])
+        bucket = parsed['Name']
+        for content in contents:
+            if content['ChecksumAlgorithm'] != ['CRC32C']:
+                self._cache[(bucket, content['Key'])] = {'checksum': None}
+                continue
+            self._executor.submit(
+                self._get_remote_checksum, bucket=bucket, key=content['Key'])
+        if self._needs_primer_hack:
+            time.sleep(3)
+            self._needs_primer_hack = False
+
+    def _get_remote_checksum(self, bucket, key):
+        head_object_params = {
+            'Bucket': bucket,
+            'Key': key,
+            'ChecksumMode': 'ENABLED',
+        }
+        response = self._client.head_object(**head_object_params)
+        checksum = base64.b64decode(response['ChecksumCRC32C'])
+        self._cache[(bucket, key)] = {'checksum': checksum}
+
+    def lookup_checksum(self, bucket, key):
+        result = self._cache.get((bucket, key))
+        if result is not None:
+            LOG.debug("Checksum cache HIT for %s/%s", bucket, key)
+            self._stats['hits'] += 1
+        else:
+            LOG.debug("Checksum cache MISS for %s/%s", bucket, key)
+            self._stats['misses'] += 1
+        LOG.debug(
+            "Cache hit ratio: %.2f\n",
+            self._stats['hits'] / float(sum(self._stats.values()))
+        )
+        return result
+
+
 class JMESSync(SizeAndLastModifiedSync):
 
     ARGUMENT = JMES_SYNC_ARG
 
-    def __init__(self, sync_type):
+    def __init__(self, sync_type, head_object_lister=None):
         super(JMESSync, self).__init__(sync_type)
+        if head_object_lister is None:
+            head_object_lister = HeadObjectLister()
         self._client = None
+        self._head_object_lister = head_object_lister
 
     def register_strategy(self, session):
         self._client = session.create_client('s3')
+        self._head_object_lister.set_client(self._client)
+        session.register(
+            'after-call.s3.ListObjectsV2',
+            self._head_object_lister.on_list_objects_response
+        )
         #session.set_stream_logger(
         #    'awscli.customizations.s3', log_level=logging.DEBUG)
         super(JMESSync, self).register_strategy(session)
@@ -127,13 +195,15 @@ class JMESSync(SizeAndLastModifiedSync):
         return not actual_checksum == local_checksum
 
     def _get_remote_checksum(self, bucket, key):
-        head_object_params = {
-            'Bucket': bucket,
-            'Key': key,
-            'ChecksumMode': 'ENABLED',
-        }
-        response = self._client.head_object(**head_object_params)
-        return base64.b64decode(response['ChecksumCRC32C'])
+        checksum = self._head_object_lister.lookup_checksum(
+            bucket=bucket, key=key)
+        if checksum is None:
+            # If we don't have the checksum, we return an empty string, which
+            # will fail the equality check and force a download.  We could
+            # alternatively just block until we get the HeadObject result if we
+            # wanted.
+            return ''
+        return checksum['checksum']
 
     def _handle_download_check(self, src_file, dest_file):
         if src_file.response_data.get('ChecksumAlgorithm', '') != ['CRC32C']:
@@ -181,5 +251,5 @@ class MerkleTree:
 
 
 
-t = MerkleTree(CrtCrc32cChecksum)
-print(t.calculate_tree_hash('.'))
+#t = MerkleTree(CrtCrc32cChecksum)
+#print(t.calculate_tree_hash('.'))
