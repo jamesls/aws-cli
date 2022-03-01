@@ -15,12 +15,17 @@ import time
 import base64
 import logging
 import concurrent.futures
+
 from awscli.botocore.httpchecksum import CrtCrc32cChecksum
+from diskcache import Cache
 
 from awscli.customizations.s3.syncstrategy.base import SizeAndLastModifiedSync
 
 
 LOG = logging.getLogger(__name__)
+CACHE_DIR = os.path.expanduser(
+    os.path.join('~', '.aws', 'cli', 'cache', 's3')
+)
 
 
 JMES_SYNC_ARG = {
@@ -29,6 +34,9 @@ JMES_SYNC_ARG = {
 
 
 class HeadObjectLister:
+
+    _CACHE_KEYS = {'ETag', 'Size', 'LastModified'}
+
     def __init__(self):
         # Key: (bucket, key) -> {'checksum': '<crc32c>'}
         #
@@ -41,6 +49,13 @@ class HeadObjectLister:
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
         self._stats = {'hits': 0, 'misses': 0}
         self._needs_primer_hack = True
+        self._cache_per_bucket = {}
+
+    def _get_cache(self, bucket):
+        if bucket not in self._cache_per_bucket:
+            path = os.path.join(CACHE_DIR, bucket)
+            self._cache_per_bucket[bucket] = Cache(path)
+        return self._cache_per_bucket[bucket]
 
     def set_client(self, client):
         self._client = client
@@ -51,17 +66,36 @@ class HeadObjectLister:
     def on_list_objects_response(self, parsed, **kwargs):
         contents = parsed.get('Contents', [])
         bucket = parsed['Name']
+        cache = self._get_cache(bucket)
         for content in contents:
+            # We need to check if the cached content is up to date.  This is to
+            # detect changes on the S3 side.
+            cache_key = (bucket, content['Key'])
             if content['ChecksumAlgorithm'] != ['CRC32C']:
-                self._cache[(bucket, content['Key'])] = {'checksum': None}
+                cache[cache_key] = {'checksum': None}
                 continue
-            self._executor.submit(
-                self._get_remote_checksum, bucket=bucket, key=content['Key'])
+            cached = cache.get(cache_key)
+            if self._cache_outdated(cached, content):
+                self._executor.submit(
+                    self._get_remote_checksum, bucket=bucket, key=content['Key'])
+            else:
+                LOG.debug("Cache file is up to date, valid checksum.")
         if self._needs_primer_hack:
+            # Give the HeadObject calls time to get going.  We could
+            # replace this with just blocking on futures going forward.
             time.sleep(3)
             self._needs_primer_hack = False
 
+    def _cache_outdated(self, cached, service_response):
+        if cached is None:
+            # No cache value, we need to do the HeadObject.
+            return True
+        actual = {k: service_response[k] for k in self._CACHE_KEYS}
+        expected = {k: cached[k] for k in self._CACHE_KEYS}
+        return cached == expected
+
     def _get_remote_checksum(self, bucket, key):
+        cache = self._get_cache(bucket)
         head_object_params = {
             'Bucket': bucket,
             'Key': key,
@@ -69,7 +103,14 @@ class HeadObjectLister:
         }
         response = self._client.head_object(**head_object_params)
         checksum = base64.b64decode(response['ChecksumCRC32C'])
-        self._cache[(bucket, key)] = {'checksum': checksum}
+        cache[(bucket, key)] = {
+            'checksum': checksum,
+            # The names between ListObjects / HeadObject don't line up
+            # exactly so we have to manually map these.
+            'ETag': response['ETag'],
+            'LastModified': response['LastModified'],
+            'Size': response['ContentLength'],
+        }
 
     def lookup_checksum(self, bucket, key):
         result = self._cache.get((bucket, key))
@@ -104,8 +145,8 @@ class JMESSync(SizeAndLastModifiedSync):
             'after-call.s3.ListObjectsV2',
             self._head_object_lister.on_list_objects_response
         )
-        #session.set_stream_logger(
-        #    'awscli.customizations.s3', log_level=logging.DEBUG)
+        session.set_stream_logger(
+            'awscli.customizations.s3', log_level=logging.DEBUG)
         super(JMESSync, self).register_strategy(session)
 
     def determine_should_sync(self, src_file, dest_file):
