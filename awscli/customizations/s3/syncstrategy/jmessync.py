@@ -26,6 +26,7 @@ LOG = logging.getLogger(__name__)
 CACHE_DIR = os.path.expanduser(
     os.path.join('~', '.aws', 'cli', 'cache', 's3')
 )
+DEBUG_STATS = 10
 
 
 JMES_SYNC_ARG = {
@@ -47,9 +48,15 @@ class HeadObjectLister:
         self._cache = {}
         self._client = None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
-        self._stats = {'hits': 0, 'misses': 0}
+        self._stats = {
+            'hits': 0,
+            'misses': 0,
+            'num_list_object_seen': 0,
+            'num_cache_outdated': 0
+        }
         self._needs_primer_hack = True
         self._cache_per_bucket = {}
+        self._last_heartbeat = time.time()
 
     def _get_cache(self, bucket):
         if bucket not in self._cache_per_bucket:
@@ -64,6 +71,7 @@ class HeadObjectLister:
     # so we can start queueing head object requests as soon
     # as we get a new set of objects.
     def on_list_objects_response(self, parsed, **kwargs):
+        self._stats['num_list_object_seen'] += 1
         contents = parsed.get('Contents', [])
         bucket = parsed['Name']
         cache = self._get_cache(bucket)
@@ -76,10 +84,13 @@ class HeadObjectLister:
                 continue
             cached = cache.get(cache_key)
             if self._cache_outdated(cached, content):
+                self._stats['num_cache_outdated'] += 1
                 self._executor.submit(
                     self._get_remote_checksum, bucket=bucket, key=content['Key'])
             else:
-                LOG.debug("Cache file is up to date, valid checksum.")
+                #LOG.debug("Cache file is up to date, valid checksum.")
+                pass
+        self._dump_debug_stats(bucket)
         if self._needs_primer_hack:
             # Give the HeadObject calls time to get going.  We could
             # replace this with just blocking on futures going forward.
@@ -111,21 +122,38 @@ class HeadObjectLister:
             'LastModified': response['LastModified'],
             'Size': response['ContentLength'],
         }
+        self._dump_debug_stats(bucket)
 
     def lookup_checksum(self, bucket, key):
         cache = self._get_cache(bucket)
         result = cache.get((bucket, key))
         if result is not None:
-            LOG.debug("Checksum cache HIT for %s/%s", bucket, key)
             self._stats['hits'] += 1
         else:
-            LOG.debug("Checksum cache MISS for %s/%s", bucket, key)
             self._stats['misses'] += 1
-        LOG.debug(
-            "Cache hit ratio: %.2f\n",
-            self._stats['hits'] / float(sum(self._stats.values()))
-        )
+        self._dump_debug_stats(bucket)
         return result
+
+    def _dump_debug_stats(self, bucket):
+        if DEBUG_STATS and time.time() - self._last_heartbeat > DEBUG_STATS:
+            parts = []
+            cache = self._get_cache(bucket)
+            parts.append(f'cache_size: {len(cache)}')
+            hits = self._stats['hits']
+            num_lookups = float(self._stats['hits'] + self._stats['misses'])
+            hit_ratio = hits / float(num_lookups)
+            parts.append(
+                "hi_ ratio: %.2f (%s / %s)" % (hit_ratio, hits, num_lookups)
+            )
+            parts.append(
+                f"num_cache_outdated: {self._stats['num_cache_outdated']}"
+            )
+            parts.append(
+                f"num_list_object_seen: {self._stats['num_list_object_seen']}"
+            )
+            final = ' '.join(parts)
+            print(final)
+            self._last_heartbeat = time.time()
 
 
 class JMESSync(SizeAndLastModifiedSync):
@@ -225,7 +253,7 @@ class JMESSync(SizeAndLastModifiedSync):
             return super(JMESSync, self).determine_should_sync(
                 src_file, dest_file)
         else:
-            LOG.debug("Checksum comparison (should sync): %s", result)
+            pass
         return result
 
     def _handle_upload_check(self, src_file, dest_file):
