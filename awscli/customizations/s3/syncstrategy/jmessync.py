@@ -14,6 +14,7 @@ import os
 import time
 import base64
 import logging
+import atexit
 import concurrent.futures
 
 from awscli.botocore.httpchecksum import CrtCrc32cChecksum
@@ -33,6 +34,7 @@ STATS = {
     'num_list_object_seen': 0,
     'num_cache_outdated': 0,
     'checksum_mismatch': 0,
+    'num_refresh_responses': 0,
 }
 
 JMES_SYNC_ARG = {
@@ -54,6 +56,8 @@ class HeadObjectLister:
         self._cache = {}
         self._client = None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
+        atexit.register(self._executor.shutdown,
+                        wait=False, cancel_futures=False)
         self._needs_primer_hack = True
         self._cache_per_bucket = {}
         self._last_heartbeat = time.time()
@@ -122,6 +126,7 @@ class HeadObjectLister:
             'LastModified': response['LastModified'],
             'Size': response['ContentLength'],
         }
+        STATS['num_refresh_responses'] += 1
         self._dump_debug_stats(bucket)
 
     def lookup_checksum(self, bucket, key):
