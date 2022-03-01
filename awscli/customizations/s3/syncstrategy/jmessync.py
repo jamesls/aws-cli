@@ -159,6 +159,9 @@ class HeadObjectLister:
             parts.append(
                 f"checksum_mismatch: {STATS['checksum_mismatch']}"
             )
+            parts.append(
+                f"num_refresh_responses: {STATS['num_refresh_responses']}"
+            )
             final = ', '.join(parts)
             print(final)
             self._last_heartbeat = time.time()
