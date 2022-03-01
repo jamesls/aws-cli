@@ -71,7 +71,7 @@ class HeadObjectLister:
             # We need to check if the cached content is up to date.  This is to
             # detect changes on the S3 side.
             cache_key = (bucket, content['Key'])
-            if content['ChecksumAlgorithm'] != ['CRC32C']:
+            if content.get('ChecksumAlgorithm') != ['CRC32C']:
                 cache[cache_key] = {'checksum': None}
                 continue
             cached = cache.get(cache_key)
@@ -83,7 +83,7 @@ class HeadObjectLister:
         if self._needs_primer_hack:
             # Give the HeadObject calls time to get going.  We could
             # replace this with just blocking on futures going forward.
-            time.sleep(3)
+            #time.sleep(3)
             self._needs_primer_hack = False
 
     def _cache_outdated(self, cached, service_response):
@@ -113,7 +113,8 @@ class HeadObjectLister:
         }
 
     def lookup_checksum(self, bucket, key):
-        result = self._cache.get((bucket, key))
+        cache = self._get_cache(bucket)
+        result = cache.get((bucket, key))
         if result is not None:
             LOG.debug("Checksum cache HIT for %s/%s", bucket, key)
             self._stats['hits'] += 1
@@ -224,7 +225,7 @@ class JMESSync(SizeAndLastModifiedSync):
             return super(JMESSync, self).determine_should_sync(
                 src_file, dest_file)
         else:
-            LOG.debug("Checksum comparison: %s", result)
+            LOG.debug("Checksum comparison (should sync): %s", result)
         return result
 
     def _handle_upload_check(self, src_file, dest_file):
