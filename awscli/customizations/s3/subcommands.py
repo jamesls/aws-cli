@@ -1102,6 +1102,7 @@ class CommandArchitecture(object):
         elif files[0].num_tasks_warned > 0:
             rc = 2
         print("run() is exiting, rc is: %s" % rc)
+        self.session.emit('s3-transfers-finished')
         return rc
 
     def _get_file_generator_request_parameters_skeleton(self):

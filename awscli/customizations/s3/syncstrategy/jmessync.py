@@ -14,7 +14,6 @@ import os
 import time
 import base64
 import logging
-import atexit
 import concurrent.futures
 
 from awscli.botocore.httpchecksum import CrtCrc32cChecksum
@@ -56,8 +55,6 @@ class HeadObjectLister:
         self._cache = {}
         self._client = None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
-        atexit.register(self._executor.shutdown,
-                        wait=False, cancel_futures=True)
         self._needs_primer_hack = True
         self._cache_per_bucket = {}
         self._last_heartbeat = time.time()
@@ -166,6 +163,11 @@ class HeadObjectLister:
             print(final)
             self._last_heartbeat = time.time()
 
+    def shutdown(self, **kwargs):
+        print("Shutting down executor.")
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        print("Executor shutdown succesfully.")
+
 
 class JMESSync(SizeAndLastModifiedSync):
 
@@ -185,6 +187,8 @@ class JMESSync(SizeAndLastModifiedSync):
             'after-call.s3.ListObjectsV2',
             self._head_object_lister.on_list_objects_response
         )
+        session.register('s3-transfers-finished',
+                         self._head_object_lister.shutdown)
         session.set_stream_logger(
             'awscli.customizations.s3', log_level=logging.DEBUG)
         super(JMESSync, self).register_strategy(session)
