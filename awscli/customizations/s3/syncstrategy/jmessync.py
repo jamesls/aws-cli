@@ -15,7 +15,7 @@ import time
 import base64
 import logging
 import concurrent.futures
-from botocore.httpchecksum import CrtCrc32cChecksum
+from awscli.botocore.httpchecksum import CrtCrc32cChecksum
 
 from awscli.customizations.s3.syncstrategy.base import SizeAndLastModifiedSync
 
