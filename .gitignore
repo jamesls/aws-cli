@@ -37,7 +37,6 @@ nosetests.xml
 
 # IDEA IDE
 .idea*
-src/
 
 # CLI docs generation
 doc/source/aws_man_pages.json
@@ -54,3 +53,6 @@ dist/
 
 # autocomplete index
 awscli/data/ac.index
+
+awsrust/list-objects-check/target
+awsrust/list-objects-check/.idea
