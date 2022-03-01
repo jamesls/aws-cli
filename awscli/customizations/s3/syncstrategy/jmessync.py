@@ -57,7 +57,7 @@ class HeadObjectLister:
         self._client = None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
         atexit.register(self._executor.shutdown,
-                        wait=False, cancel_futures=False)
+                        wait=False, cancel_futures=True)
         self._needs_primer_hack = True
         self._cache_per_bucket = {}
         self._last_heartbeat = time.time()

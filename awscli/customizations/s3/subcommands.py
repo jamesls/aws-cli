@@ -1101,6 +1101,7 @@ class CommandArchitecture(object):
             rc = 1
         elif files[0].num_tasks_warned > 0:
             rc = 2
+        print("run() is exiting, rc is: %s" % rc)
         return rc
 
     def _get_file_generator_request_parameters_skeleton(self):
