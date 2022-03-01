@@ -27,7 +27,13 @@ CACHE_DIR = os.path.expanduser(
     os.path.join('~', '.aws', 'cli', 'cache', 's3')
 )
 DEBUG_STATS = 10
-
+STATS = {
+    'hits': 0,
+    'misses': 0,
+    'num_list_object_seen': 0,
+    'num_cache_outdated': 0,
+    'checksum_mismatch': 0,
+}
 
 JMES_SYNC_ARG = {
     'name': 'jmes-sync', 'action': 'store_true',
@@ -48,12 +54,6 @@ class HeadObjectLister:
         self._cache = {}
         self._client = None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
-        self._stats = {
-            'hits': 0,
-            'misses': 0,
-            'num_list_object_seen': 0,
-            'num_cache_outdated': 0
-        }
         self._needs_primer_hack = True
         self._cache_per_bucket = {}
         self._last_heartbeat = time.time()
@@ -71,7 +71,7 @@ class HeadObjectLister:
     # so we can start queueing head object requests as soon
     # as we get a new set of objects.
     def on_list_objects_response(self, parsed, **kwargs):
-        self._stats['num_list_object_seen'] += 1
+        STATS['num_list_object_seen'] += 1
         contents = parsed.get('Contents', [])
         bucket = parsed['Name']
         cache = self._get_cache(bucket)
@@ -84,7 +84,7 @@ class HeadObjectLister:
                 continue
             cached = cache.get(cache_key)
             if self._cache_outdated(cached, content):
-                self._stats['num_cache_outdated'] += 1
+                STATS['num_cache_outdated'] += 1
                 self._executor.submit(
                     self._get_remote_checksum, bucket=bucket, key=content['Key'])
             else:
@@ -128,9 +128,9 @@ class HeadObjectLister:
         cache = self._get_cache(bucket)
         result = cache.get((bucket, key))
         if result is not None:
-            self._stats['hits'] += 1
+            STATS['hits'] += 1
         else:
-            self._stats['misses'] += 1
+            STATS['misses'] += 1
         self._dump_debug_stats(bucket)
         return result
 
@@ -139,19 +139,22 @@ class HeadObjectLister:
             parts = []
             cache = self._get_cache(bucket)
             parts.append(f'cache_size: {len(cache)}')
-            hits = self._stats['hits']
-            num_lookups = float(self._stats['hits'] + self._stats['misses'])
+            hits = STATS['hits']
+            num_lookups = float(STATS['hits'] + STATS['misses'])
             hit_ratio = hits / float(num_lookups)
             parts.append(
-                "hi_ ratio: %.2f (%s / %s)" % (hit_ratio, hits, num_lookups)
+                "hit_ratio: %.2f (%s / %s)" % (hit_ratio, hits, num_lookups)
             )
             parts.append(
-                f"num_cache_outdated: {self._stats['num_cache_outdated']}"
+                f"num_cache_outdated: {STATS['num_cache_outdated']}"
             )
             parts.append(
-                f"num_list_object_seen: {self._stats['num_list_object_seen']}"
+                f"num_list_object_seen: {STATS['num_list_object_seen']}"
             )
-            final = ' '.join(parts)
+            parts.append(
+                f"checksum_mismatch: {STATS['checksum_mismatch']}"
+            )
+            final = ', '.join(parts)
             print(final)
             self._last_heartbeat = time.time()
 
@@ -262,7 +265,10 @@ class JMESSync(SizeAndLastModifiedSync):
         bucket, key = src_file.dest.split('/', 1)
         actual_checksum = self._get_remote_checksum(bucket, key)
         local_checksum = self._compute_local_checksum(src_file.src)
-        return not actual_checksum == local_checksum
+        needs_sync = not actual_checksum == local_checksum
+        if needs_sync:
+            STATS['checksum_mismatch'] += 1
+        return needs_sync
 
     def _get_remote_checksum(self, bucket, key):
         checksum = self._head_object_lister.lookup_checksum(
