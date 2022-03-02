@@ -1,3 +1,4 @@
+use http::HeaderValue;
 use aws_sdk_s3::{Client, Error};
 use aws_sdk_s3::operation::ListObjectsV2;
 use aws_sdk_s3::operation::HeadObject;
@@ -59,10 +60,17 @@ async fn main() -> Result<(), Error> {
                 let reqclone = req.try_clone().unwrap();
                 let newop = Operation::new(reqclone, parts.response_handler);
 
-                let llresponse = llclient.call(newop)
+                let llresponse = llclient.call_raw(newop)
                     .await
-                    .expect("Should succeed");
-                llresponse.e_tag.unwrap_or_default()
+                    .expect("Should not fail");
+                let defaultvalue = HeaderValue::from_static("");
+                let value = llresponse.raw
+                    .http()
+                    .headers()
+                    .get("x-amz-checksum-crc32c").unwrap_or(&defaultvalue);
+                let actual = value.to_str();
+                let unwrapped = actual.unwrap();
+                String::from(unwrapped)
             }
         }
     ).buffer_unordered(30);
