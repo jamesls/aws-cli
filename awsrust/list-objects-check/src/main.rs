@@ -1,5 +1,6 @@
 use aws_sdk_s3::{Client, Error};
 use aws_sdk_s3::operation::ListObjectsV2;
+use aws_sdk_s3::operation::HeadObject;
 use aws_smithy_http::operation::Operation;
 use futures::{stream, StreamExt};
 use http::header::HeaderName;
@@ -8,7 +9,7 @@ use http::header::HeaderName;
 async fn main() -> Result<(), Error> {
     env_logger::init();
     let shared_config = aws_config::load_from_env().await;
-    let client = Client::new(&shared_config);
+    let _client = Client::new(&shared_config);
     let bucket = "jamesls-test-sync";
     let conf = aws_sdk_s3::Config::new(&shared_config);
     //let resp = client.list_objects_v2().bucket(bucket).send().await?;
@@ -26,15 +27,6 @@ async fn main() -> Result<(), Error> {
         .unwrap();
 
     let (mut req, parts) = operation.into_request_response();
-    /*
-    req.augment(|mut inner_req: http::Request<aws_smithy_http::body::SdkBody>, _conf| -> Result<http::Request<aws_smithy_http::body::SdkBody>, Error> {
-        inner_req.headers_mut().append(
-            HeaderName::from_static("x-amz-checksum-mode"),
-            "ENABLED".parse().unwrap(),
-        );
-        Ok(inner_req)
-    });
-     */
     req.http_mut().headers_mut().append(
         HeaderName::from_static("x-amz-checksum-mode"),
         "ENABLED".parse().unwrap(),
@@ -45,27 +37,38 @@ async fn main() -> Result<(), Error> {
     let llresponse = low_level_client.call(newop)
         .await
         .expect("Should succeed");
-    for obj in llresponse.contents().unwrap_or_default() {
-        println!("{}", obj.key().unwrap_or_default());
-    }
-
-    /*
-    let allreqs = stream::iter(resp.contents().unwrap_or_default()).map(
+    let allreqs = stream::iter(llresponse.contents().unwrap_or_default()).map(
         |obj| {
-            let client = &client;
+            let llclient = &low_level_client;
+            let newconf = &conf;
             async move {
-                let resp = client.head_object()
-                    .bucket(bucket)
-                    .key(obj.key().unwrap_or_default())
-                    .send().await.unwrap();
-                resp.e_tag.unwrap_or_default()
+               let headobj_op = HeadObject::builder()
+                   .bucket(bucket)
+                   .key(obj.key().unwrap_or_default())
+                   .build()
+                   .unwrap()
+                   .make_operation(newconf)
+                   .await
+                   .unwrap();
+
+                let (mut req, parts) = headobj_op.into_request_response();
+                req.http_mut().headers_mut().append(
+                    HeaderName::from_static("x-amz-checksum-mode"),
+                    "ENABLED".parse().unwrap(),
+                );
+                let reqclone = req.try_clone().unwrap();
+                let newop = Operation::new(reqclone, parts.response_handler);
+
+                let llresponse = llclient.call(newop)
+                    .await
+                    .expect("Should succeed");
+                llresponse.e_tag.unwrap_or_default()
             }
         }
     ).buffer_unordered(30);
     allreqs.for_each(|headobj_resp| async move {
         println!("{}", headobj_resp);
     }).await;
-     */
 
 
 
