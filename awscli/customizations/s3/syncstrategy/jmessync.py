@@ -11,10 +11,13 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 import os
+import json
 import time
 import base64
 import logging
+import subprocess
 import concurrent.futures
+import tempfile
 
 from awscli.botocore.httpchecksum import CrtCrc32cChecksum
 from diskcache import Cache
@@ -39,6 +42,7 @@ STATS = {
 JMES_SYNC_ARG = {
     'name': 'jmes-sync', 'action': 'store_true',
     'help_text': 'A fast, content-based syncing algorithm.'}
+BATCH_EXECUTABLE = os.path.join(os.path.dirname(__file__), 'list-objects-check')
 
 
 class HeadObjectLister:
@@ -55,7 +59,6 @@ class HeadObjectLister:
         self._cache = {}
         self._client = None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
-        self._needs_primer_hack = True
         self._cache_per_bucket = {}
         self._last_heartbeat = time.time()
 
@@ -76,6 +79,7 @@ class HeadObjectLister:
         contents = parsed.get('Contents', [])
         bucket = parsed['Name']
         cache = self._get_cache(bucket)
+        keys = []
         for content in contents:
             # We need to check if the cached content is up to date.  This is to
             # detect changes on the S3 side.
@@ -86,17 +90,44 @@ class HeadObjectLister:
             cached = cache.get(cache_key)
             if self._cache_outdated(cached, content):
                 STATS['num_cache_outdated'] += 1
-                self._executor.submit(
-                    self._get_remote_checksum, bucket=bucket, key=content['Key'])
+                keys.append({
+                    'key': content['Key'],
+                    'ETag': content['ETag'],
+                    'LastModified': content['LastModified'],
+                    'Size': content['Size'],
+                })
             else:
                 #LOG.debug("Cache file is up to date, valid checksum.")
                 pass
+        if keys:
+            self._executor.submit(
+                self._batch_get_remote_checksum, bucket=bucket, keys=keys)
         self._dump_debug_stats(bucket)
-        if self._needs_primer_hack:
-            # Give the HeadObject calls time to get going.  We could
-            # replace this with just blocking on futures going forward.
-            #time.sleep(3)
-            self._needs_primer_hack = False
+
+    def _batch_get_remote_checksum(self, bucket, keys):
+        cache = self._get_cache(bucket)
+        with tempfile.NamedTemporaryFile('w') as f:
+            just_keys = [k['key'] for k in keys]
+            f.write(
+                json.dumps({'keys': just_keys})
+            )
+            f.flush()
+            process = subprocess.run('%s %s %s' % (BATCH_EXECUTABLE, bucket, f.name),
+                                     shell=True, capture_output=True)
+            if process.returncode != 0:
+                print("ERROR: %s" % process.stderr)
+            lines = process.stdout.splitlines()
+            if len(lines) == len(keys):
+                for key, checksum in zip(keys, lines):
+                    cache[(bucket, key)] = {
+                        'checksum': base64.b64decode(checksum),
+                        'ETag': key['ETag'],
+                        'LastModified': key['LastModified'],
+                        'Size': key['Size'],
+                    }
+            print("Updated cache with HeadObj responses")
+            STATS['num_refresh_responses'] += 1
+        self._dump_debug_stats(bucket)
 
     def _cache_outdated(self, cached, service_response):
         if cached is None:
