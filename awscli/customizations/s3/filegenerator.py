@@ -20,7 +20,7 @@ from botocore.exceptions import ClientError
 
 from awscli.customizations.s3.utils import find_bucket_key, get_file_stat
 from awscli.customizations.s3.utils import BucketLister, create_warning, \
-    find_dest_path_comp_key, EPOCH_TIME
+    find_dest_path_comp_key, EPOCH_TIME, ParallelBucketLister
 from awscli.compat import six
 from awscli.compat import queue
 
@@ -318,6 +318,7 @@ class FileGenerator(object):
             yield self._list_single_object(s3_path)
         else:
             lister = BucketLister(self._client)
+            #lister = ParallelBucketLister(self._client)
             extra_args = self.request_parameters.get('ListObjectsV2', {})
             for key in lister.list_objects(bucket=bucket, prefix=prefix,
                                            page_size=self.page_size,

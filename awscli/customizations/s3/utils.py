@@ -11,6 +11,7 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 import argparse
+import time
 import logging
 from datetime import datetime
 import mimetypes
@@ -416,6 +417,88 @@ class BucketLister(object):
                 content['LastModified'] = self._date_parser(
                     content['LastModified'])
                 yield source_path, content
+
+
+from concurrent.futures import ThreadPoolExecutor, wait
+
+
+class ParallelBucketLister(object):
+    def __init__(self, client, date_parser=_date_parser):
+        self._client = client
+        self._date_parser = date_parser
+
+    def list_objects(self, bucket, prefix=None, page_size=None,
+                     extra_args=None):
+        allowed_starts = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f']
+        num_workers = len(allowed_starts)
+        start_ranges = allowed_starts[:num_workers]
+        stop_keys = set()
+        kwargs = {'Bucket': bucket} #, 'PaginationConfig': {'PageSize': page_size}}
+        if prefix is not None:
+            kwargs['Prefix'] = prefix
+        if extra_args is not None:
+            kwargs.update(extra_args)
+
+        futures = []
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            for ch in start_ranges:
+                future = executor.submit(self._handle_range, ch, stop_keys, kwargs.copy())
+                futures.append(future)
+
+            # Special case first batch in the main thread.
+            time.sleep(2)
+            for val in self._special_case_first_batch(stop_keys, kwargs):
+                yield val
+            for f in futures:
+                result = f.result()
+                for keyobj in result:
+                    yield keyobj
+
+    def _special_case_first_batch(self, stop_keys, list_kwargs):
+        paginator = self._client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(**list_kwargs)
+        bucket = list_kwargs['Bucket']
+        for page in pages:
+            contents = page.get('Contents', [])
+            for content in contents:
+                if content['Key'] in stop_keys:
+                    print("First case batch stopped, found stop key: %s" % content['Key'])
+                    return
+                source_path = bucket + '/' + content['Key']
+                content['LastModified'] = self._date_parser(
+                    content['LastModified'])
+                yield source_path, content
+
+    def _handle_range(self, start_char, stop_keys, list_kwargs):
+        list_kwargs['StartAfter'] = start_char
+        bucket = list_kwargs['Bucket']
+        all_keys = []
+        is_first_request = True
+        print("Starting range with start_char: %s" % start_char)
+        while True:
+            response = self._client.list_objects_v2(**list_kwargs)
+            contents = response.get('Contents', [])
+            for content in contents:
+                if content['Key'] in stop_keys:
+                    print("Found stop key for start_char %s: %s, total_keys: %s" % (
+                        start_char, content['Key'], len(all_keys)))
+                    return all_keys
+                source_path = bucket + '/' + content['Key']
+                content['LastModified'] = self._date_parser(
+                    content['LastModified'])
+                all_keys.append((source_path, content))
+            if contents and is_first_request:
+                stop_keys.add(contents[0]['Key'])
+                print("stop_keys:", stop_keys)
+                is_first_request = False
+            next_token = response.get('NextContinuationToken')
+            if next_token is None:
+                print("No next token, done with: %s" % start_char)
+                break
+            list_kwargs['ContinuationToken'] = next_token
+            list_kwargs.pop('StartAfter', None)
+        print("Returning for startchar %s, total keys: %s" % (start_char, len(all_keys)))
+        return all_keys
 
 
 class PrintTask(namedtuple('PrintTask',
