@@ -178,7 +178,10 @@ class HeadObjectLister:
             parts.append(f'cache_size: {len(cache)}')
             hits = STATS['hits']
             num_lookups = float(STATS['hits'] + STATS['misses'])
-            hit_ratio = hits / float(num_lookups)
+            if int(num_lookups) == 0:
+                hit_ratio = 0
+            else:
+                hit_ratio = hits / float(num_lookups)
             parts.append(
                 "hit_ratio: %.2f (%s / %s)" % (hit_ratio, hits, num_lookups)
             )
