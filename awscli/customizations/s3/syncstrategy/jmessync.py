@@ -37,6 +37,7 @@ STATS = {
     'num_cache_outdated': 0,
     'checksum_mismatch': 0,
     'num_refresh_responses': 0,
+    'local_csum_cache_hit': 0,
 }
 
 JMES_SYNC_ARG = {
@@ -59,7 +60,7 @@ class LocalCSumClass:
 
     def _cache_local_checksum(self, key):
         if os.path.isfile(key):
-            self._do_compute_local_checksum(key, key)
+            return self._do_compute_local_checksum(key, key)
 
     def _do_compute_local_checksum(self, filename, cache_key):
         with open(filename, 'rb') as f:
@@ -377,6 +378,7 @@ class JMESSync(SizeAndLastModifiedSync):
         if cache_key is not None:
             result = self._head_object_lister.lookup_local_checksum(cache_key)
             if result is not None:
+                STATS['local_csum_cache_hit'] += 1
                 return result
         with open(filename, 'rb') as f:
             c = CrtCrc32cChecksum()
