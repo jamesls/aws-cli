@@ -429,7 +429,7 @@ class ParallelBucketLister(object):
 
     def list_objects(self, bucket, prefix=None, page_size=None,
                      extra_args=None):
-        allowed_starts = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f']
+        allowed_starts = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f']
         num_workers = len(allowed_starts)
         start_ranges = allowed_starts[:num_workers]
         stop_keys = set()
@@ -446,7 +446,7 @@ class ParallelBucketLister(object):
                 futures.append(future)
 
             # Special case first batch in the main thread.
-            time.sleep(2)
+            time.sleep(1)
             for val in self._special_case_first_batch(stop_keys, kwargs):
                 yield val
             for f in futures:
