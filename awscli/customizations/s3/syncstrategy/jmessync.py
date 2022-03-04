@@ -45,6 +45,29 @@ JMES_SYNC_ARG = {
 BATCH_EXECUTABLE = os.path.join(os.path.dirname(__file__), 'list-objects-check')
 
 
+class LocalCSumClass:
+    def __init__(self):
+        pass
+
+    def compute_keys(self, keys):
+        final = {}
+        with concurrent.futures.ProcessPoolExecutor() as w:
+            results = w.map(self._cache_local_checksum, keys)
+            for key, result in zip(keys, results):
+                final[key] = result
+        return final
+
+    def _cache_local_checksum(self, key):
+        if os.path.isfile(key):
+            self._do_compute_local_checksum(key, key)
+
+    def _do_compute_local_checksum(self, filename, cache_key):
+        with open(filename, 'rb') as f:
+            c = CrtCrc32cChecksum()
+            c.update(f.read())
+            digest = c.digest()
+            return digest
+
 class HeadObjectLister:
 
     _CACHE_KEYS = {'ETag', 'Size', 'LastModified'}
@@ -63,25 +86,12 @@ class HeadObjectLister:
         self._last_heartbeat = time.time()
         self._local_file_cache = {}
 
-    def _do_compute_local_checksum(self, filename, cache_key):
-        with open(filename, 'rb') as f:
-            c = CrtCrc32cChecksum()
-            c.update(f.read())
-            digest = c.digest()
-            return digest
-
     def lookup_local_checksum(self, cache_key):
         return self._local_file_cache.get(cache_key)
 
     def _cache_all_local_keys(self, keys):
-        with concurrent.futures.ProcessPoolExecutor() as w:
-            results = w.map(self._cache_local_checksum, keys)
-            for key, result in zip(keys, results):
-                self._local_file_cache[key] = result
-
-    def _cache_local_checksum(self, key):
-        if os.path.isfile(key):
-            self._do_compute_local_checksum(key, key)
+        results = LocalCSumClass().compute_keys(keys)
+        self._local_file_cache.update(results)
 
     def _get_cache(self, bucket):
         if bucket not in self._cache_per_bucket:
