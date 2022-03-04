@@ -58,26 +58,30 @@ class HeadObjectLister:
         # Key: (bucket, key) -> {'checksum': None}
         self._cache = {}
         self._client = None
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=20)
         self._cache_per_bucket = {}
         self._last_heartbeat = time.time()
         self._local_file_cache = {}
 
-    def _compute_local_checksum(self, filename, cache_key):
+    def _do_compute_local_checksum(self, filename, cache_key):
         with open(filename, 'rb') as f:
             c = CrtCrc32cChecksum()
             c.update(f.read())
             digest = c.digest()
-            self._local_file_cache[filename] = digest
-            self._local_file_cache[cache_key] = digest
             return digest
 
     def lookup_local_checksum(self, cache_key):
         return self._local_file_cache.get(cache_key)
 
+    def _cache_all_local_keys(self, keys):
+        with concurrent.futures.ProcessPoolExecutor() as w:
+            results = w.map(self._cache_local_checksum, keys)
+            for key, result in zip(keys, results):
+                self._local_file_cache[key] = result
+
     def _cache_local_checksum(self, key):
         if os.path.isfile(key):
-            self._compute_local_checksum(key, key)
+            self._do_compute_local_checksum(key, key)
 
     def _get_cache(self, bucket):
         if bucket not in self._cache_per_bucket:
@@ -97,15 +101,16 @@ class HeadObjectLister:
         bucket = parsed['Name']
         cache = self._get_cache(bucket)
         keys = []
+        all_keys = []
         for content in contents:
             # We need to check if the cached content is up to date.  This is to
             # detect changes on the S3 side.
             cache_key = (bucket, content['Key'])
+            all_keys.append(content['Key'])
             if content.get('ChecksumAlgorithm') != ['CRC32C']:
                 cache[cache_key] = {'checksum': None}
                 continue
             cached = cache.get(cache_key)
-            self._executor.submit(self._cache_local_checksum, content['Key'])
             if self._cache_outdated(cached, content):
                 STATS['num_cache_outdated'] += 1
                 keys.append({
@@ -119,6 +124,7 @@ class HeadObjectLister:
             else:
                 #LOG.debug("Cache file is up to date, valid checksum.")
                 pass
+        self._executor.submit(self._cache_all_local_keys, all_keys)
         if keys:
             pass
             #self._executor.submit(
