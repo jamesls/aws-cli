@@ -58,7 +58,7 @@ class HeadObjectLister:
         # Key: (bucket, key) -> {'checksum': None}
         self._cache = {}
         self._client = None
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=30)
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
         self._cache_per_bucket = {}
         self._last_heartbeat = time.time()
 
@@ -118,8 +118,9 @@ class HeadObjectLister:
                 print("ERROR: %s" % process.stderr)
             lines = process.stdout.splitlines()
             if len(lines) == len(keys):
-                for key, checksum in zip(keys, lines):
-                    cache[(bucket, key)] = {
+                for key, line in zip(keys, lines):
+                    checksum, actualkey = line.decode('utf-8').split(',')
+                    cache[(bucket, actualkey)] = {
                         'checksum': base64.b64decode(checksum),
                         'ETag': key['ETag'],
                         'LastModified': key['LastModified'],
