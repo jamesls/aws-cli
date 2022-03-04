@@ -29,7 +29,7 @@ async fn batch_head_objects(low_level_client: aws_smithy_client::Client<DynConne
             async move {
                 let headobj_op = HeadObject::builder()
                     .bucket(bucket)
-                    .key(obj)
+                    .key(obj.clone())
                     .build()
                     .unwrap()
                     .make_operation(newconf)
@@ -54,7 +54,11 @@ async fn batch_head_objects(low_level_client: aws_smithy_client::Client<DynConne
                     .get("x-amz-checksum-crc32c").unwrap_or(&defaultvalue);
                 let actual = value.to_str();
                 let unwrapped = actual.unwrap();
-                String::from(unwrapped)
+                let mut mystr = String::from(unwrapped);
+                mystr.push(',');
+                let q = obj.as_str();
+                mystr.push_str(q);
+                mystr
             }
         }
     ).buffer_unordered(30);
