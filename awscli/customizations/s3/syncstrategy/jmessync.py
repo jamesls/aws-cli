@@ -61,6 +61,23 @@ class HeadObjectLister:
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
         self._cache_per_bucket = {}
         self._last_heartbeat = time.time()
+        self._local_file_cache = {}
+
+    def _compute_local_checksum(self, filename, cache_key):
+        with open(filename, 'rb') as f:
+            c = CrtCrc32cChecksum()
+            c.update(f.read())
+            digest = c.digest()
+            self._local_file_cache[filename] = digest
+            self._local_file_cache[cache_key] = digest
+            return digest
+
+    def lookup_local_checksum(self, cache_key):
+        return self._local_file_cache.get(cache_key)
+
+    def _cache_local_checksum(self, key):
+        if os.path.isfile(key):
+            self._compute_local_checksum(key, key)
 
     def _get_cache(self, bucket):
         if bucket not in self._cache_per_bucket:
@@ -88,6 +105,7 @@ class HeadObjectLister:
                 cache[cache_key] = {'checksum': None}
                 continue
             cached = cache.get(cache_key)
+            self._executor.submit(self._cache_local_checksum, content['Key'])
             if self._cache_outdated(cached, content):
                 STATS['num_cache_outdated'] += 1
                 keys.append({
@@ -314,7 +332,7 @@ class JMESSync(SizeAndLastModifiedSync):
             return None
         bucket, key = src_file.dest.split('/', 1)
         actual_checksum = self._get_remote_checksum(bucket, key)
-        local_checksum = self._compute_local_checksum(src_file.src)
+        local_checksum = self._compute_local_checksum(src_file.src, cache_key=key)
         needs_sync = not actual_checksum == local_checksum
         if needs_sync:
             STATS['checksum_mismatch'] += 1
@@ -336,10 +354,14 @@ class JMESSync(SizeAndLastModifiedSync):
             return None
         bucket, key = src_file.src.split('/', 1)
         actual_checksum = self._get_remote_checksum(bucket, key)
-        local_checksum = self._compute_local_checksum(src_file.dest)
+        local_checksum = self._compute_local_checksum(src_file.dest, cache_key=key)
         return not actual_checksum == local_checksum
 
-    def _compute_local_checksum(self, filename):
+    def _compute_local_checksum(self, filename, cache_key=None):
+        if cache_key is not None:
+            result = self._head_object_lister.lookup_local_checksum(cache_key)
+            if result is not None:
+                return result
         with open(filename, 'rb') as f:
             c = CrtCrc32cChecksum()
             c.update(f.read())
