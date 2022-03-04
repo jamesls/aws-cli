@@ -96,12 +96,15 @@ class HeadObjectLister:
                     'LastModified': content['LastModified'],
                     'Size': content['Size'],
                 })
+                self._executor.submit(
+                    self._get_remote_checksum, bucket=bucket, key=content['Key'])
             else:
                 #LOG.debug("Cache file is up to date, valid checksum.")
                 pass
         if keys:
-            self._executor.submit(
-                self._batch_get_remote_checksum, bucket=bucket, keys=keys)
+            pass
+            #self._executor.submit(
+            #    self._batch_get_remote_checksum, bucket=bucket, keys=keys)
         self._dump_debug_stats(bucket)
 
     def _batch_get_remote_checksum(self, bucket, keys):
