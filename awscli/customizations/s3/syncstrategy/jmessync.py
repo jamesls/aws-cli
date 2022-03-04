@@ -232,6 +232,9 @@ class HeadObjectLister:
             parts.append(
                 f"num_refresh_responses: {STATS['num_refresh_responses']}"
             )
+            parts.append(
+                f"local_checksum: {STATS['local_csum_cache_hit']}"
+            )
             final = ', '.join(parts)
             print(final)
             self._last_heartbeat = time.time()
