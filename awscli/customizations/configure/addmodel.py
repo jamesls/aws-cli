@@ -45,7 +45,8 @@ def _get_service_name(session, endpoint_prefix):
         return name_mappings.get(endpoint_prefix, endpoint_prefix)
 
 
-def get_model_location(session, service_definition, service_name=None):
+def get_model_location(session, service_definition, service_name=None,
+                       service_format=None):
     """Gets the path of where a service-2.json file should go in ~/.aws/models
 
     :type session: botocore.session.Session
@@ -76,11 +77,27 @@ def get_model_location(session, service_definition, service_name=None):
     # not the one set by AWS_DATA_PATH)
     data_path = session.get_component('data_loader').CUSTOMER_DATA_PATH
     # Use the version of the model to determine the file's naming convention.
-    service_model_name = (
-        'service-%d.json' % int(
-            float(service_definition.get('version', '2.0'))))
+    if service_format is None:
+        service_model_name = (
+            'service-%d.json' % int(
+                float(service_definition.get('version', '2.0'))))
+    elif service_format == 'smithy':
+        service_model_name = (
+            'service-%d.smithy' % int(
+                float(service_definition.get('version', '2.0'))))
     return os.path.join(data_path, service_name, api_version,
         service_model_name)
+
+
+def get_service_definition(model_contents, model_format):
+    if model_format is None:
+        # Assume existing behavhior that we're adding a JSON model.
+        return json.loads(model_contents)
+    elif model_format == 'smithy':
+        # This is hacky for now but we're going to convert it to our
+        # service model so we can process it the same as before.
+        from jmessmith.converter import convert_smithy_idl_to_service_json
+        return convert_smithy_idl_to_service_json(model_contents)
 
 
 class AddModelCommand(BasicCommand):
@@ -96,15 +113,20 @@ class AddModelCommand(BasicCommand):
             'The contents of the service JSON model.')},
         {'name': 'service-name', 'help_text': (
             'Overrides the default name used by the service JSON '
-            'model to generate CLI service commands and Boto3 clients.')}
+            'model to generate CLI service commands and Boto3 clients.')},
+        {'name': 'service-format', 'help_text': (
+            'The format of the service file, use this to indicate a smithy '
+            'file.')},
     ]
 
     def _run_main(self, parsed_args, parsed_globals):
-        service_definition = json.loads(parsed_args.service_model)
+        service_definition = get_service_definition(parsed_args.service_model,
+                                                    parsed_args.service_format)
 
         # Get the path to where the model should be written
         model_location = get_model_location(
-            self._session, service_definition, parsed_args.service_name
+            self._session, service_definition, parsed_args.service_name,
+            parsed_args.service_format
         )
 
         # If the service_name/api_version directories do not exist,
