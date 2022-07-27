@@ -109,6 +109,7 @@ from botocore.compat import OrderedDict, json
 from botocore.exceptions import DataNotFoundError, UnknownServiceError
 from botocore.utils import deep_merge
 
+from jmessmith.converter import convert_smithy_idl_to_service_json
 logger = logging.getLogger(__name__)
 
 
@@ -133,7 +134,15 @@ def instance_cache(func):
     return _wrapper
 
 
-class JSONFileLoader(object):
+class FileLoader:
+    def exists(self, file_path):
+        pass
+
+    def load_file(self, file_path):
+        pass
+
+
+class JSONFileLoader(FileLoader):
     """Loader JSON files.
 
     This class can load the default format of models, which is a JSON file.
@@ -172,6 +181,40 @@ class JSONFileLoader(object):
 
         logger.debug("Loading JSON file: %s", full_path)
         return json.loads(payload, object_pairs_hook=OrderedDict)
+
+
+class SmithyFileLoader(FileLoader):
+    def exists(self, file_path):
+        return os.path.isfile(file_path + '.smithy')
+
+    def load_file(self, file_path):
+        full_path = file_path + '.smithy'
+        if not os.path.isfile(full_path):
+            return
+
+        with open(full_path) as f:
+            contents = f.read()
+        return convert_smithy_idl_to_service_json(contents)
+
+
+class ChainFileLoader(FileLoader):
+    def __init__(self, *loaders):
+        self._loaders = loaders
+
+    @classmethod
+    def default_chain(cls):
+        return cls(JSONFileLoader(), SmithyFileLoader())
+
+    def exists(self, file_path):
+        for loader in self._loaders:
+            if loader.exists(file_path):
+                return True
+        return False
+
+    def load_file(self, file_path):
+        for loader in self._loaders:
+            if (result := loader.load_file(file_path)):
+                return result
 
 
 def create_loader(search_path_string=None):
@@ -220,7 +263,7 @@ class Loader(object):
                  include_default_extras=True):
         self._cache = {}
         if file_loader is None:
-            file_loader = self.FILE_LOADER_CLASS()
+            file_loader = ChainFileLoader.default_chain()
         self.file_loader = file_loader
         if extra_search_paths is not None:
             self._search_paths = extra_search_paths
