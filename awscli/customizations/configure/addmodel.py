@@ -109,19 +109,31 @@ class AddModelCommand(BasicCommand):
         'provided.'
     )
     ARG_TABLE = [
-        {'name': 'service-model', 'required': True, 'help_text': (
+        {'name': 'service-model', 'help_text': (
             'The contents of the service JSON model.')},
+        {'name': 'model-path', 'help_text': (
+            'The path to the model file.')},
         {'name': 'service-name', 'help_text': (
             'Overrides the default name used by the service JSON '
             'model to generate CLI service commands and Boto3 clients.')},
         {'name': 'service-format', 'help_text': (
             'The format of the service file, use this to indicate a smithy '
             'file.')},
+        {'name': 'symlink', 'action': 'store_true', 'help_text': (
+            'Symlink the model file instead of copying it to models dir.')},
     ]
 
     def _run_main(self, parsed_args, parsed_globals):
-        service_definition = get_service_definition(parsed_args.service_model,
-                                                    parsed_args.service_format)
+        if parsed_args.service_model is not None:
+            service_definition = get_service_definition(parsed_args.service_model,
+                                                        parsed_args.service_format)
+        elif parsed_args.model_path is not None:
+            with open(parsed_args.model_path) as f:
+                contents = f.read()
+                service_definition = get_service_definition(contents,
+                                                            parsed_args.service_format)
+        else:
+            raise RuntimeError("Must provider with --service-model or --model-path")
 
         # Get the path to where the model should be written
         model_location = get_model_location(
@@ -136,7 +148,13 @@ class AddModelCommand(BasicCommand):
             os.makedirs(model_directory)
 
         # Write the model to the specified location
-        with open(model_location, 'wb') as f:
-            f.write(parsed_args.service_model.encode('utf-8'))
+        if parsed_args.symlink:
+            if parsed_args.model_path is None:
+                raise RuntimeError(
+                    "Can only use --symlink if --model-path is provided")
+            os.symlink(os.path.abspath(parsed_args.model_path), model_location)
+        else:
+            with open(model_location, 'wb') as f:
+                f.write(parsed_args.service_model.encode('utf-8'))
 
         return 0
