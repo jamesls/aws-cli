@@ -136,6 +136,20 @@ You may need to change this value for a few reasons:
   S3 transfer.
 
 
+max_pool_connections
+--------------------
+
+**Default** - None
+
+If set to ``auto``, the AWS CLI configures the S3 HTTP connection pool based
+on ``max_concurrent_requests``. When this value is not set, the AWS CLI
+preserves the default connection pool behavior.
+
+This setting primarily affects the ``classic`` transfer client. The ``crt``
+transfer client does not use botocore's HTTP connection pool for data
+transfers.
+
+
 max_queue_size
 --------------
 

@@ -19,3 +19,6 @@ CRT_TRANSFER_CLIENT = 'crt'
 # Constants for bucket_lister configuration
 STANDARD_BUCKET_LISTER = 'standard'
 THREADED_BUCKET_LISTER = 'threaded'
+
+# Constants for max_pool_connections configuration
+AUTO_RESOLVE_MAX_POOL_CONNECTIONS = 'auto'

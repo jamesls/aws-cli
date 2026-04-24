@@ -1078,12 +1078,16 @@ class S3TransferCommand(S3Command):
         register_feature_id('S3_TRANSFER')
         self._convert_path_args(parsed_args)
         params = self._get_params(parsed_args, parsed_globals, self._session)
+        runtime_config = self._get_runtime_config()
         (
             source_client,
             transfer_client,
             source_listing_client,
             destination_listing_client,
-        ) = self._get_source_and_transfer_clients(params=params)
+        ) = self._get_source_and_transfer_clients(
+            params=params,
+            runtime_config=runtime_config,
+        )
         trace_config = parse_s3_trace_config()
         tracer = create_s3_transfer_tracer(
             trace_config=trace_config,
@@ -1098,7 +1102,6 @@ class S3TransferCommand(S3Command):
                 destination_listing_client,
             ],
         )
-        runtime_config = self._get_runtime_config()
         bucket_lister_cls = _BUCKET_LISTERS[runtime_config['bucket_lister']]
         transfer_manager = self._get_transfer_manager(
             params=params,
@@ -1147,17 +1150,25 @@ class S3TransferCommand(S3Command):
         cmd_params.add_paths(parsed_args.paths)
         return cmd_params.parameters
 
-    def _get_source_and_transfer_clients(self, params):
+    def _get_source_and_transfer_clients(self, params, runtime_config=None):
         client_factory = ClientFactory(self._session)
         source_client = client_factory.create_client(
-            params, is_source_client=True
+            params,
+            is_source_client=True,
+            runtime_config=runtime_config,
         )
-        transfer_client = client_factory.create_client(params)
+        transfer_client = client_factory.create_client(
+            params,
+            runtime_config=runtime_config,
+        )
         source_listing_client = client_factory.create_listing_client(
-            params, is_source_client=True
+            params,
+            is_source_client=True,
+            runtime_config=runtime_config,
         )
         destination_listing_client = client_factory.create_listing_client(
-            params
+            params,
+            runtime_config=runtime_config,
         )
         return (
             source_client,

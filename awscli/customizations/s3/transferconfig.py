@@ -36,6 +36,7 @@ DEFAULTS = {
     'disk_throughput': None,
     'direct_io': None,
     'bucket_lister': constants.THREADED_BUCKET_LISTER,
+    'max_pool_connections': None,
 }
 
 
@@ -73,6 +74,9 @@ class RuntimeConfig:
         'bucket_lister': [
             constants.THREADED_BUCKET_LISTER,
             constants.STANDARD_BUCKET_LISTER,
+        ],
+        'max_pool_connections': [
+            constants.AUTO_RESOLVE_MAX_POOL_CONNECTIONS,
         ],
     }
     CHOICE_ALIASES = {

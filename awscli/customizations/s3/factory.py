@@ -44,13 +44,19 @@ class ClientFactory:
     def __init__(self, session):
         self._session = session
 
-    def create_client(self, params, is_source_client=False):
+    def create_client(
+        self, params, is_source_client=False, runtime_config=None
+    ):
         create_client_kwargs = self._get_client_kwargs(
-            params, is_source_client=is_source_client
+            params,
+            is_source_client=is_source_client,
+            runtime_config=runtime_config,
         )
         return self._session.create_client('s3', **create_client_kwargs)
 
-    def create_listing_client(self, params, is_source_client=False):
+    def create_listing_client(
+        self, params, is_source_client=False, runtime_config=None
+    ):
         original_factory = self._session.get_component(
             self._RESPONSE_PARSER_FACTORY_COMPONENT
         )
@@ -61,17 +67,27 @@ class ClientFactory:
         )
         try:
             return self.create_client(
-                params, is_source_client=is_source_client
+                params,
+                is_source_client=is_source_client,
+                runtime_config=runtime_config,
             )
         finally:
             self._session.register_component(
                 self._RESPONSE_PARSER_FACTORY_COMPONENT, original_factory
             )
 
-    def _get_client_kwargs(self, params, is_source_client=False):
+    def _get_client_kwargs(
+        self, params, is_source_client=False, runtime_config=None
+    ):
         create_client_kwargs = {'verify': params['verify_ssl']}
+        config_kwargs = {}
         if params.get('sse') == 'aws:kms':
-            create_client_kwargs['config'] = Config(signature_version='s3v4')
+            config_kwargs['signature_version'] = 's3v4'
+        max_pool_connections = self._get_max_pool_connections(runtime_config)
+        if max_pool_connections is not None:
+            config_kwargs['max_pool_connections'] = max_pool_connections
+        if config_kwargs:
+            create_client_kwargs['config'] = Config(**config_kwargs)
         region = params['region']
         endpoint_url = params['endpoint_url']
         if is_source_client and params['source_region']:
@@ -82,6 +98,16 @@ class ClientFactory:
         create_client_kwargs['region_name'] = region
         create_client_kwargs['endpoint_url'] = endpoint_url
         return create_client_kwargs
+
+    def _get_max_pool_connections(self, runtime_config):
+        if runtime_config is None:
+            return None
+        if (
+            runtime_config.get('max_pool_connections')
+            != constants.AUTO_RESOLVE_MAX_POOL_CONNECTIONS
+        ):
+            return None
+        return max(10, runtime_config['max_concurrent_requests'] + 2)
 
 
 class TransferManagerFactory:

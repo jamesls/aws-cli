@@ -127,6 +127,40 @@ class TestClientFactory(unittest.TestCase):
             's3v4',
         )
 
+    def test_create_client_sets_auto_max_pool_connections(self):
+        params = {
+            'region': 'us-west-2',
+            'endpoint_url': None,
+            'verify_ssl': None,
+        }
+        runtime_config = RuntimeConfig().build_config(
+            max_concurrent_requests=64,
+            max_pool_connections='auto',
+        )
+        self.factory.create_client(params, runtime_config=runtime_config)
+        self.assertEqual(
+            self.session.create_client.call_args[1][
+                'config'
+            ].max_pool_connections,
+            66,
+        )
+
+    def test_create_client_combines_sigv4_and_auto_max_pool_connections(self):
+        params = {
+            'region': 'us-west-2',
+            'endpoint_url': None,
+            'verify_ssl': None,
+            'sse': 'aws:kms',
+        }
+        runtime_config = RuntimeConfig().build_config(
+            max_concurrent_requests=64,
+            max_pool_connections='auto',
+        )
+        self.factory.create_client(params, runtime_config=runtime_config)
+        config = self.session.create_client.call_args[1]['config']
+        self.assertEqual(config.signature_version, 's3v4')
+        self.assertEqual(config.max_pool_connections, 66)
+
     def test_create_client_with_no_source_region(self):
         params = {
             'region': 'us-west-2',

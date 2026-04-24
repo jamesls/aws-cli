@@ -104,6 +104,20 @@ class TestTransferConfig:
         assert runtime_config['bucket_lister'] == resolved
 
     @pytest.mark.parametrize(
+        'provided,resolved',
+        [
+            (None, None),
+            ('auto', 'auto'),
+        ],
+    )
+    def test_set_max_pool_connections(self, provided, resolved):
+        config_kwargs = {}
+        if provided is not None:
+            config_kwargs['max_pool_connections'] = provided
+        runtime_config = self.build_config_with(**config_kwargs)
+        assert runtime_config['max_pool_connections'] == resolved
+
+    @pytest.mark.parametrize(
         'config_name,provided,expected',
         [
             # max_bandwidth cases
@@ -169,6 +183,10 @@ class TestTransferConfig:
     def test_validates_bucket_lister_choices(self):
         with pytest.raises(transferconfig.InvalidConfigError):
             self.build_config_with(bucket_lister='not-supported')
+
+    def test_validates_max_pool_connections_choices(self):
+        with pytest.raises(transferconfig.InvalidConfigError):
+            self.build_config_with(max_pool_connections='20')
 
     @pytest.mark.parametrize(
         'attr,val,expected',
