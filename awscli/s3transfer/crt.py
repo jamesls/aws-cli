@@ -13,7 +13,6 @@
 import logging
 import re
 import threading
-from io import BytesIO
 
 import awscrt.http
 import botocore.awsrequest
@@ -320,7 +319,7 @@ class CRTTransferManager:
 
     def _submit_transfer(self, request_type, call_args):
         register_feature_id('S3_TRANSFER')
-        on_done_after_calls = [self._release_semaphore]
+        on_done_after_calls = []
         coordinator = CRTTransferCoordinator(
             transfer_id=self._id_counter,
             exception_translator=self._crt_exception_translator,
@@ -334,7 +333,6 @@ class CRTTransferManager:
         on_done_after_calls.append(afterdone)
 
         try:
-            self._semaphore.acquire()
             on_queued = self._s3_args_creator.get_crt_callback(
                 future, 'queued'
             )
@@ -346,6 +344,12 @@ class CRTTransferManager:
                 future,
                 on_done_after_calls,
             )
+            self._semaphore.acquire()
+            # AfterDoneHandler marks all done callbacks complete, and shutdown()
+            # waits on that signal. Release must run first or shutdown() can
+            # observe completion while this transfer still holds its in-flight
+            # semaphore slot.
+            on_done_after_calls.insert(0, self._release_semaphore)
             crt_s3_request = self._crt_s3_client.make_request(**crt_callargs)
         except Exception as e:
             coordinator.set_exception(e, True)
@@ -439,6 +443,11 @@ class BaseCRTRequestSerializer:
         raise NotImplementedError('translate_crt_exception()')
 
 
+class _HTTPRequestCaptureError(Exception):
+    def __init__(self, request):
+        self.request = request
+
+
 class BotocoreCRTRequestSerializer(BaseCRTRequestSerializer):
     def __init__(self, session, client_kwargs=None):
         """Serialize CRT HTTP request using botocore logic
@@ -457,14 +466,8 @@ class BotocoreCRTRequestSerializer(BaseCRTRequestSerializer):
             client_kwargs = {}
         self._resolve_client_config(session, client_kwargs)
         self._client = session.create_client(**client_kwargs)
-        self._client.meta.events.register(
-            'request-created.s3.*', self._capture_http_request
-        )
-        self._client.meta.events.register(
-            'after-call.s3.*', self._change_response_to_serialized_http_request
-        )
-        self._client.meta.events.register(
-            'before-send.s3.*', self._make_fake_http_response
+        self._client.meta.events.register_first(
+            'before-send.s3.*', self._capture_prepared_http_request
         )
         self._client.meta.events.register(
             'before-call.s3.*', self._remove_checksum_context
@@ -535,27 +538,21 @@ class BotocoreCRTRequestSerializer(BaseCRTRequestSerializer):
 
         return crt_request
 
-    def _capture_http_request(self, request, **kwargs):
-        request.context['http_request'] = request
-
-    def _change_response_to_serialized_http_request(
-        self, context, parsed, **kwargs
-    ):
-        request = context['http_request']
-        parsed['HTTPRequest'] = request.prepare()
-
-    def _make_fake_http_response(self, request, **kwargs):
-        return botocore.awsrequest.AWSResponse(
-            None,
-            200,
-            {},
-            FakeRawResponse(b""),
-        )
+    def _capture_prepared_http_request(self, request, **kwargs):
+        raise _HTTPRequestCaptureError(request)
 
     def _get_botocore_http_request(self, client_method, call_args):
-        return getattr(self._client, client_method)(
-            Bucket=call_args.bucket, Key=call_args.key, **call_args.extra_args
-        )['HTTPRequest']
+        try:
+            getattr(self._client, client_method)(
+                Bucket=call_args.bucket,
+                Key=call_args.key,
+                **call_args.extra_args,
+            )
+        except _HTTPRequestCaptureError as error:
+            return error.request
+        raise RuntimeError(
+            f'Unable to capture prepared HTTP request for {client_method}.'
+        )
 
     def serialize_http_request(self, transfer_type, future):
         botocore_http_request = self._get_botocore_http_request(
@@ -602,15 +599,6 @@ class BotocoreCRTRequestSerializer(BaseCRTRequestSerializer):
         request_context = params.get("context", {})
         if "checksum" in request_context:
             del request_context["checksum"]
-
-
-class FakeRawResponse(BytesIO):
-    def stream(self, amt=1024, decode_content=None):
-        while True:
-            chunk = self.read(amt)
-            if not chunk:
-                break
-            yield chunk
 
 
 class BotocoreCRTCredentialsWrapper:

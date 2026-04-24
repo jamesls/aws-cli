@@ -62,6 +62,14 @@ class RecordingSubscriber(BaseSubscriber):
         self.on_done_future = future
 
 
+class ExtraArgsSubscriber(BaseSubscriber):
+    def __init__(self, extra_args):
+        self._extra_args = extra_args
+
+    def on_queued(self, future, **kwargs):
+        future.meta.call_args.extra_args.update(self._extra_args)
+
+
 @requires_crt()
 class TestCRTTransferManager(unittest.TestCase):
     def setUp(self):
@@ -396,6 +404,22 @@ class TestCRTTransferManager(unittest.TestCase):
             ],
         )
         self._assert_subscribers_called(future)
+
+    def test_on_queued_mutation_applies_to_serialized_request(self):
+        future = self.transfer_manager.upload(
+            self.filename,
+            self.bucket,
+            self.key,
+            {},
+            [ExtraArgsSubscriber({'ContentType': 'text/plain'})],
+        )
+        future.result()
+
+        callargs_kwargs = self.s3_crt_client.make_request.call_args[1]
+        self.assertEqual(
+            callargs_kwargs["request"].headers.get('Content-Type'),
+            'text/plain',
+        )
 
     def test_upload_throws_error_for_unsupported_checksum(self):
         with self.assertRaisesRegex(

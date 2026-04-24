@@ -22,9 +22,12 @@ class BaseSubscriber:
     """
 
     VALID_SUBSCRIBER_TYPES = ['queued', 'progress', 'done']
+    _VALIDATED = False
 
     def __new__(cls, *args, **kwargs):
-        cls._validate_subscriber_methods()
+        if not cls._VALIDATED:
+            cls._validate_subscriber_methods()
+            cls._VALIDATED = True
         return super().__new__(cls)
 
     @classmethod
