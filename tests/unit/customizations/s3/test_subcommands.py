@@ -13,6 +13,7 @@
 import argparse
 import os
 import sys
+from contextlib import nullcontext
 
 import botocore.session
 
@@ -33,6 +34,10 @@ from awscli.customizations.s3.syncstrategy.base import (
     SizeAndLastModifiedSync,
 )
 from awscli.customizations.s3.transferconfig import RuntimeConfig
+from awscli.customizations.s3.bucketlister import (
+    BucketLister,
+    ThreadedBucketLister,
+)
 from awscli.testutils import (
     BaseAWSCommandParamsTest,
     BaseAWSHelpOutputTest,
@@ -292,6 +297,8 @@ class CommandArchitectureTest(BaseAWSCommandParamsTest):
         self.transfer_manager = mock.Mock()
         self.source_client = mock.Mock()
         self.transfer_client = mock.Mock()
+        self.source_listing_client = mock.Mock()
+        self.destination_listing_client = mock.Mock()
         self.file_creator = FileCreator()
         self.loc_files = make_loc_files(self.file_creator)
         self.output = StringIO()
@@ -310,7 +317,9 @@ class CommandArchitectureTest(BaseAWSCommandParamsTest):
         super(CommandArchitectureTest, self).tearDown()
         clean_loc_files(self.file_creator)
 
-    def get_cmd_architecture(self, cmd, params):
+    def get_cmd_architecture(
+        self, cmd, params, bucket_lister_cls=ThreadedBucketLister
+    ):
         return CommandArchitecture(
             session=self.session,
             cmd=cmd,
@@ -318,6 +327,9 @@ class CommandArchitectureTest(BaseAWSCommandParamsTest):
             transfer_manager=self.transfer_manager,
             source_client=self.source_client,
             transfer_client=self.transfer_client,
+            source_listing_client=self.source_listing_client,
+            destination_listing_client=self.destination_listing_client,
+            bucket_lister_cls=bucket_lister_cls,
         )
 
     def get_params(self, **override_kwargs):
@@ -367,6 +379,146 @@ class CommandArchitectureTest(BaseAWSCommandParamsTest):
         self.assertEqual(
             cmd_arc.instructions,
             ['file_generator', 'filters', 'file_info_builder', 's3_handler'],
+        )
+
+    def test_run_passes_source_and_destination_listing_clients(self):
+        class StopExecution(Exception):
+            pass
+
+        params = self.get_params(
+            src='s3://source/',
+            dest='s3://dest/',
+            paths_type='s3s3',
+            follow_symlinks=True,
+            page_size=None,
+            request_payer=None,
+            case_conflict='ignore',
+        )
+        cmd_arc = self.get_cmd_architecture('cp', params)
+
+        with mock.patch(
+            'awscli.customizations.s3.subcommands.FileFormat'
+        ) as file_format, mock.patch(
+            'awscli.customizations.s3.subcommands.FileGenerator'
+        ) as file_generator:
+            file_format.return_value.format.side_effect = [
+                {
+                    'src': {'path': 's3://source/', 'type': 's3'},
+                    'dest': {'path': 's3://dest/', 'type': 's3'},
+                    'dir_op': True,
+                },
+                {
+                    'src': {'path': 's3://dest/', 'type': 's3'},
+                    'dest': {'path': 's3://source/', 'type': 's3'},
+                    'dir_op': True,
+                },
+            ]
+            file_generator.side_effect = [mock.Mock(), StopExecution()]
+
+            with self.assertRaises(StopExecution):
+                cmd_arc.run()
+
+        self.assertEqual(
+            file_generator.call_args_list[0][1]['listing_client'],
+            self.source_listing_client,
+        )
+        self.assertEqual(
+            file_generator.call_args_list[1][1]['listing_client'],
+            self.destination_listing_client,
+        )
+
+    def test_run_uses_threaded_bucket_lister_by_default(self):
+        class StopExecution(Exception):
+            pass
+
+        params = self.get_params(
+            src='s3://source/',
+            dest='s3://dest/',
+            paths_type='s3s3',
+            follow_symlinks=True,
+            page_size=None,
+            request_payer=None,
+            case_conflict='ignore',
+        )
+        cmd_arc = self.get_cmd_architecture('cp', params)
+
+        with mock.patch(
+            'awscli.customizations.s3.subcommands.FileFormat'
+        ) as file_format, mock.patch(
+            'awscli.customizations.s3.subcommands.FileGenerator'
+        ) as file_generator:
+            file_format.return_value.format.side_effect = [
+                {
+                    'src': {'path': 's3://source/', 'type': 's3'},
+                    'dest': {'path': 's3://dest/', 'type': 's3'},
+                    'dir_op': True,
+                },
+                {
+                    'src': {'path': 's3://dest/', 'type': 's3'},
+                    'dest': {'path': 's3://source/', 'type': 's3'},
+                    'dir_op': True,
+                },
+            ]
+            file_generator.side_effect = [mock.Mock(), StopExecution()]
+
+            with self.assertRaises(StopExecution):
+                cmd_arc.run()
+
+        self.assertEqual(
+            file_generator.call_args_list[0][1]['bucket_lister_cls'],
+            ThreadedBucketLister,
+        )
+        self.assertEqual(
+            file_generator.call_args_list[1][1]['bucket_lister_cls'],
+            ThreadedBucketLister,
+        )
+
+    def test_run_uses_standard_bucket_lister_when_configured(self):
+        class StopExecution(Exception):
+            pass
+
+        params = self.get_params(
+            src='s3://source/',
+            dest='s3://dest/',
+            paths_type='s3s3',
+            follow_symlinks=True,
+            page_size=None,
+            request_payer=None,
+            case_conflict='ignore',
+        )
+        cmd_arc = self.get_cmd_architecture(
+            'cp', params, bucket_lister_cls=BucketLister
+        )
+
+        with mock.patch(
+            'awscli.customizations.s3.subcommands.FileFormat'
+        ) as file_format, mock.patch(
+            'awscli.customizations.s3.subcommands.FileGenerator'
+        ) as file_generator:
+            file_format.return_value.format.side_effect = [
+                {
+                    'src': {'path': 's3://source/', 'type': 's3'},
+                    'dest': {'path': 's3://dest/', 'type': 's3'},
+                    'dir_op': True,
+                },
+                {
+                    'src': {'path': 's3://dest/', 'type': 's3'},
+                    'dest': {'path': 's3://source/', 'type': 's3'},
+                    'dir_op': True,
+                },
+            ]
+            file_generator.side_effect = [mock.Mock(), StopExecution()]
+
+            with self.assertRaises(StopExecution):
+                cmd_arc.run()
+
+        self.assertEqual(
+            file_generator.call_args_list[0][1]['bucket_lister_cls'],
+            BucketLister,
+        )
+        self.assertEqual(
+            file_generator.call_args_list[1][1]['bucket_lister_cls'],
+            BucketLister,
         )
 
     def test_choose_sync_strategy_default(self):
@@ -729,6 +881,83 @@ class HelpDocTest(BaseAWSHelpOutputTest):
         s3_command(['help'], [])
         self.assert_contains('sync')
         self.assert_contains("Synopsis")
+
+
+class TestS3TransferCommandTracing(unittest.TestCase):
+    def setUp(self):
+        self.session = mock.Mock()
+        self.parsed_args = FakeArgs(paths=['src', 'dest'])
+        self.parsed_globals = FakeArgs()
+        self.source_client = mock.Mock()
+        self.transfer_client = mock.Mock()
+        self.source_listing_client = mock.Mock()
+        self.destination_listing_client = mock.Mock()
+        self.params = {
+            'src': 's3://source/',
+            'dest': 's3://dest/',
+            'paths_type': 's3s3',
+            'is_stream': False,
+        }
+
+    def test_sync_registers_tracing_for_both_clients(self):
+        command = SyncCommand(self.session)
+        trace_config = object()
+        tracer = mock.Mock()
+        transfer_manager = mock.Mock()
+        architecture = mock.Mock()
+        architecture.run.return_value = 0
+
+        with mock.patch(
+            'awscli.customizations.s3.subcommands.S3Command._run_main'
+        ), mock.patch(
+            'awscli.customizations.s3.subcommands.register_feature_id'
+        ), mock.patch.object(
+            command, '_convert_path_args'
+        ), mock.patch.object(
+            command, '_get_params', return_value=self.params
+        ), mock.patch.object(
+            command,
+            '_get_source_and_transfer_clients',
+            return_value=(
+                self.source_client,
+                self.transfer_client,
+                self.source_listing_client,
+                self.destination_listing_client,
+            ),
+        ), mock.patch(
+            'awscli.customizations.s3.subcommands.parse_s3_trace_config',
+            return_value=trace_config,
+        ), mock.patch(
+            'awscli.customizations.s3.subcommands.create_s3_transfer_tracer',
+            return_value=tracer,
+        ) as create_tracer, mock.patch.object(
+            command, '_get_transfer_manager', return_value=transfer_manager
+        ), mock.patch.object(
+            command,
+            '_get_runtime_config',
+            return_value=RuntimeConfig().build_config(),
+        ), mock.patch(
+            'awscli.customizations.s3.subcommands.CommandArchitecture',
+            return_value=architecture,
+        ), mock.patch(
+            'awscli.customizations.s3.subcommands.scoped_s3_transfer_tracer',
+            return_value=nullcontext(tracer),
+        ):
+            command._run_main(self.parsed_args, self.parsed_globals)
+
+        create_tracer.assert_called_once_with(
+            trace_config=trace_config,
+            command_name='sync',
+            parameters=self.params,
+            source_client=self.source_client,
+            transfer_client=self.transfer_client,
+            clients=[
+                self.source_client,
+                self.transfer_client,
+                self.source_listing_client,
+                self.destination_listing_client,
+            ],
+        )
 
 
 if __name__ == "__main__":
