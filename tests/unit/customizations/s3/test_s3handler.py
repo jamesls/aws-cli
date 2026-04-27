@@ -60,6 +60,11 @@ from awscli.customizations.s3.utils import (
     WarningResult,
 )
 from awscli.testutils import FileCreator, mock, unittest
+from tests.unit.customizations.s3 import (
+    FakeTransferFuture,
+    FakeTransferFutureCallArgs,
+    FakeTransferFutureMeta,
+)
 
 
 def runtime_config(**kwargs):
@@ -485,6 +490,18 @@ class TestDownloadRequestSubmitter(BaseTransferRequestSubmitterTest):
     def assert_no_downloads_happened(self):
         self.assertEqual(len(self.transfer_manager.download.call_args_list), 0)
 
+    def create_download_future(self, filename):
+        call_args = FakeTransferFutureCallArgs(fileobj=filename)
+        meta = FakeTransferFutureMeta(call_args=call_args)
+        return FakeTransferFuture(meta=meta)
+
+    def get_last_directory_creator_subscriber(self):
+        download_call_kwargs = self.transfer_manager.download.call_args[1]
+        for subscriber in download_call_kwargs['subscribers']:
+            if isinstance(subscriber, DirectoryCreatorSubscriber):
+                return subscriber
+        raise AssertionError('No DirectoryCreatorSubscriber found')
+
     def create_file_info(self, key, associated_response_data=None):
         kwargs = {
             'src': self.bucket + '/' + key,
@@ -533,6 +550,23 @@ class TestDownloadRequestSubmitter(BaseTransferRequestSubmitterTest):
         self.assertEqual(len(ref_subscribers), len(actual_subscribers))
         for i, actual_subscriber in enumerate(actual_subscribers):
             self.assertIsInstance(actual_subscriber, ref_subscribers[i])
+
+    def test_directory_creator_is_shared_across_download_subscribers(self):
+        fileinfo = self.create_file_info(self.key)
+        self.transfer_request_submitter.submit(fileinfo)
+        first_subscriber = self.get_last_directory_creator_subscriber()
+
+        second_fileinfo = self.create_file_info('second-key')
+        self.transfer_request_submitter.submit(second_fileinfo)
+        second_subscriber = self.get_last_directory_creator_subscriber()
+
+        filename = os.path.join('download', 'myfile')
+        future = self.create_download_future(filename)
+        with mock.patch('os.makedirs') as makedirs:
+            first_subscriber.on_queued(future)
+            second_subscriber.on_queued(future)
+
+        self.assertEqual(makedirs.call_count, 1)
 
     def test_submit_with_extra_args(self):
         fileinfo = self.create_file_info(self.key)

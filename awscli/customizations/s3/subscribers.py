@@ -27,6 +27,23 @@ class CreateDirectoryError(Exception):
     pass
 
 
+class DirectoryCreator:
+    def __init__(self):
+        self._created_dirs = set()
+
+    def make_directory(self, directory):
+        if directory in self._created_dirs:
+            return
+        try:
+            os.makedirs(directory)
+        except OSError as e:
+            if not e.errno == errno.EEXIST:
+                raise CreateDirectoryError(
+                    f"Could not create directory {directory}: {e}"
+                )
+        self._created_dirs.add(directory)
+
+
 # TODO: Eventually port this down to the BaseSubscriber or a new subscriber
 # class in s3transfer. The functionality is very convenient but may need
 # some further design decisions to make it a feature in s3transfer.
@@ -230,16 +247,15 @@ class ProvideLastModifiedTimeSubscriber(OnDoneFilteredSubscriber):
 class DirectoryCreatorSubscriber(BaseSubscriber):
     """Creates a directory to download if it does not exist"""
 
+    def __init__(self, directory_creator=None):
+        super().__init__()
+        if directory_creator is None:
+            directory_creator = DirectoryCreator()
+        self._directory_creator = directory_creator
+
     def on_queued(self, future, **kwargs):
         d = os.path.dirname(future.meta.call_args.fileobj)
-        try:
-            if not os.path.exists(d):
-                os.makedirs(d)
-        except OSError as e:
-            if not e.errno == errno.EEXIST:
-                raise CreateDirectoryError(
-                    "Could not create directory %s: %s" % (d, e)
-                )
+        self._directory_creator.make_directory(d)
 
 
 class CopyPropsSubscriberFactory:

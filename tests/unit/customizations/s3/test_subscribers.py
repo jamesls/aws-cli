@@ -35,6 +35,7 @@ from awscli.customizations.s3.subscribers import (
     DeleteCopySourceObjectSubscriber,
     DeleteSourceFileSubscriber,
     DeleteSourceObjectSubscriber,
+    DirectoryCreator,
     DirectoryCreatorSubscriber,
     OnDoneFilteredSubscriber,
     ProvideETagSubscriber,
@@ -53,6 +54,45 @@ from tests.unit.customizations.s3 import (
     FakeTransferFutureCallArgs,
     FakeTransferFutureMeta,
 )
+
+
+class TestDirectoryCreator(unittest.TestCase):
+    def setUp(self):
+        self.directory = 'new-directory'
+        self.directory_creator = DirectoryCreator()
+
+    def test_make_directory_only_calls_makedirs_once_per_directory(self):
+        with mock.patch('os.makedirs') as makedirs:
+            self.directory_creator.make_directory(self.directory)
+            self.directory_creator.make_directory(self.directory)
+
+        self.assertEqual(makedirs.call_count, 1)
+
+    def test_make_directory_does_not_check_exists(self):
+        with mock.patch('os.path.exists') as exists:
+            with mock.patch('os.makedirs'):
+                self.directory_creator.make_directory(self.directory)
+
+        exists.assert_not_called()
+
+    def test_make_directory_treats_existing_directory_as_success(self):
+        os_error = OSError()
+        os_error.errno = errno.EEXIST
+        with mock.patch('os.makedirs') as makedirs:
+            makedirs.side_effect = os_error
+            self.directory_creator.make_directory(self.directory)
+            self.directory_creator.make_directory(self.directory)
+
+        self.assertEqual(makedirs.call_count, 1)
+
+    def test_make_directory_does_not_cache_failures(self):
+        with mock.patch('os.makedirs') as makedirs:
+            makedirs.side_effect = [OSError(), None]
+            with self.assertRaises(CreateDirectoryError):
+                self.directory_creator.make_directory(self.directory)
+            self.directory_creator.make_directory(self.directory)
+
+        self.assertEqual(makedirs.call_count, 2)
 
 
 class TestProvideSizeSubscriber(unittest.TestCase):

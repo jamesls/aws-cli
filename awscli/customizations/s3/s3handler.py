@@ -38,6 +38,7 @@ from awscli.customizations.s3.subscribers import (
     DeleteCopySourceObjectSubscriber,
     DeleteSourceFileSubscriber,
     DeleteSourceObjectSubscriber,
+    DirectoryCreator,
     DirectoryCreatorSubscriber,
     ProvideETagSubscriber,
     ProvideFullObjectChecksumSubscriber,
@@ -414,11 +415,17 @@ class UploadRequestSubmitter(BaseTransferRequestSubmitter):
 class DownloadRequestSubmitter(BaseTransferRequestSubmitter):
     REQUEST_MAPPER_METHOD = RequestParamsMapper.map_get_object_params
 
+    def __init__(self, transfer_manager, result_queue, cli_params):
+        super().__init__(transfer_manager, result_queue, cli_params)
+        self._directory_creator = DirectoryCreator()
+
     def can_submit(self, fileinfo):
         return fileinfo.operation_name == 'download'
 
     def _add_additional_subscribers(self, subscribers, fileinfo):
-        subscribers.append(DirectoryCreatorSubscriber())
+        subscribers.append(
+            DirectoryCreatorSubscriber(self._directory_creator)
+        )
         subscribers.append(
             ProvideLastModifiedTimeSubscriber(
                 fileinfo.last_update, self._result_queue
