@@ -28,6 +28,7 @@ TRACE_ENV_VAR = 'AWS_CLI_S3_TRACE'
 TRACE_VERSION = 1
 NORMAL_MODE = 'normal'
 SUPPORTED_MODES = [NORMAL_MODE]
+DEFAULT_TRACE_BUFFER_SIZE = 100
 _CURRENT_S3_TRANSFER_TRACER = ContextVar(
     'awscli_s3_transfer_tracer', default=None
 )
@@ -144,6 +145,8 @@ class S3TransferTracer:
         self._stderr = stderr
         self._time_fn = time_fn or time.monotonic_ns
         self._thread_id_fn = thread_id_fn or threading.get_ident
+        self._trace_buffer_size = DEFAULT_TRACE_BUFFER_SIZE
+        self._trace_buffer = []
 
         self._lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -298,6 +301,7 @@ class S3TransferTracer:
         try:
             summary = self.build_summary()
             self._emit_event('command_summary', **summary)
+            self._flush_trace_buffer()
             self._write_summary_to_stderr(summary)
         finally:
             self._unregister_event_handlers()
@@ -395,9 +399,21 @@ class S3TransferTracer:
         event.update(fields)
         payload = json.dumps(event) + '\n'
         with self._lock:
-            self._output_file.write(payload)
-            self._output_file.flush()
+            self._trace_buffer.append(payload)
+            if len(self._trace_buffer) >= self._trace_buffer_size:
+                self._flush_trace_buffer_locked()
         return event
+
+    def _flush_trace_buffer(self):
+        with self._lock:
+            self._flush_trace_buffer_locked()
+
+    def _flush_trace_buffer_locked(self):
+        if not self._trace_buffer:
+            return
+        self._output_file.write(''.join(self._trace_buffer))
+        self._output_file.flush()
+        self._trace_buffer = []
 
     def _write_summary_to_stderr(self, summary):
         stderr = self._stderr if self._stderr is not None else sys.stderr

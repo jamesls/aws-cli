@@ -29,6 +29,16 @@ from awscli.customizations.s3.bucketlister import (
 from awscli.testutils import mock, unittest
 
 
+class CountingStringIO(StringIO):
+    def __init__(self):
+        super().__init__()
+        self.flush_count = 0
+
+    def flush(self):
+        self.flush_count += 1
+        return super().flush()
+
+
 class TestParseS3TraceConfig(unittest.TestCase):
     def test_parses_trace_env_var(self):
         config = parse_s3_trace_config(
@@ -48,12 +58,86 @@ class TestParseS3TraceConfig(unittest.TestCase):
 
 class TestS3TransferTracer(unittest.TestCase):
     def setUp(self):
-        self.output_file = StringIO()
+        self.output_file = CountingStringIO()
         self.stderr = StringIO()
         self.source_client = mock.Mock()
         self.source_client.meta.events = mock.Mock()
         self.transfer_client = mock.Mock()
         self.transfer_client.meta.events = mock.Mock()
+
+    def test_buffers_trace_events_until_buffer_size_is_reached(self):
+        emitter = HierarchicalEmitter()
+        self.source_client.meta.events = emitter
+        trace_config = parse_s3_trace_config(
+            {'AWS_CLI_S3_TRACE': 'normal,out=/tmp/trace.jsonl'}
+        )
+        tracer = S3TransferTracer(
+            trace_config=trace_config,
+            command_name='cp',
+            parameters={'src': 's3://bucket/prefix/'},
+            source_client=self.source_client,
+            output_file=self.output_file,
+            output_path='/tmp/trace.jsonl',
+            stderr=self.stderr,
+            time_fn=lambda: 0,
+        )
+
+        for _ in range(99):
+            emitter.emit(
+                'before-call.s3.ListObjectsV2',
+                model=None,
+                params={'query_string': {}},
+                request_signer=None,
+                context={},
+            )
+        self.assertEqual(self.output_file.getvalue(), '')
+        self.assertEqual(self.output_file.flush_count, 0)
+
+        emitter.emit(
+            'before-call.s3.ListObjectsV2',
+            model=None,
+            params={'query_string': {}},
+            request_signer=None,
+            context={},
+        )
+        output_lines = self.output_file.getvalue().splitlines()
+        self.assertEqual(len(output_lines), 100)
+        self.assertIn('list_request_start', output_lines[0])
+        self.assertIn('list_request_start', output_lines[-1])
+        self.assertEqual(self.output_file.flush_count, 1)
+        tracer.close()
+
+    def test_flushes_partial_trace_buffer_on_close(self):
+        emitter = HierarchicalEmitter()
+        self.source_client.meta.events = emitter
+        trace_config = parse_s3_trace_config(
+            {'AWS_CLI_S3_TRACE': 'normal,out=/tmp/trace.jsonl'}
+        )
+        tracer = S3TransferTracer(
+            trace_config=trace_config,
+            command_name='cp',
+            parameters={'src': 's3://bucket/prefix/'},
+            source_client=self.source_client,
+            output_file=self.output_file,
+            output_path='/tmp/trace.jsonl',
+            stderr=self.stderr,
+            time_fn=lambda: 0,
+        )
+
+        emitter.emit(
+            'before-call.s3.ListObjectsV2',
+            model=None,
+            params={'query_string': {}},
+            request_signer=None,
+            context={},
+        )
+        self.assertEqual(self.output_file.getvalue(), '')
+
+        tracer.close()
+        output_lines = self.output_file.getvalue().splitlines()
+        self.assertEqual(len(output_lines), 2)
+        self.assertIn('list_request_start', output_lines[0])
+        self.assertIn('command_summary', output_lines[1])
 
     def test_records_summary_metrics(self):
         ms = 1000000
