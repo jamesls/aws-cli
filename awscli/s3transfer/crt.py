@@ -44,6 +44,10 @@ from botocore.config import Config
 from botocore.exceptions import NoCredentialsError
 from botocore.useragent import register_feature_id
 from botocore.utils import ArnParser, InvalidArnException, is_s3express_bucket
+from awscli.customizations.s3.tracer import (
+    get_current_s3_transfer_tracer,
+    scoped_s3_transfer_tracer,
+)
 from s3transfer.constants import FULL_OBJECT_CHECKSUM_ARGS, MB
 from s3transfer.exceptions import TransferNotDoneError
 from s3transfer.futures import BaseTransferFuture, BaseTransferMeta
@@ -52,6 +56,7 @@ from s3transfer.utils import CallArgs, OSUtils, get_callbacks
 logger = logging.getLogger(__name__)
 
 CRT_S3_PROCESS_LOCK = None
+CRT_TRANSFER_SEMAPHORE_CAPACITY = 128
 
 
 def acquire_crt_s3_process_lock(name):
@@ -217,7 +222,8 @@ class CRTTransferManager:
             crt_request_serializer.translate_crt_exception
         )
         self._future_coordinators = []
-        self._semaphore = threading.Semaphore(128)  # not configurable
+        self._semaphore_capacity = CRT_TRANSFER_SEMAPHORE_CAPACITY
+        self._semaphore = threading.Semaphore(self._semaphore_capacity)
         # A counter to create unique id's for each transfer submitted.
         self._id_counter = 0
 
@@ -315,7 +321,33 @@ class CRTTransferManager:
             self._wait_transfers_done()
 
     def _release_semaphore(self, **kwargs):
+        transfer_id = kwargs.get('transfer_id')
         self._semaphore.release()
+        self._record_crt_semaphore_state('released', transfer_id)
+
+    def _get_release_semaphore_callback(self, transfer_id):
+        def release_semaphore(**kwargs):
+            kwargs['transfer_id'] = transfer_id
+            self._release_semaphore(**kwargs)
+
+        return release_semaphore
+
+    def _acquire_semaphore(self, transfer_id):
+        self._semaphore.acquire()
+        self._record_crt_semaphore_state('acquired', transfer_id)
+
+    def _record_crt_semaphore_state(self, action, transfer_id):
+        tracer = get_current_s3_transfer_tracer()
+        if tracer is None:
+            return
+        available = self._semaphore._value
+        tracer.record_crt_semaphore_state(
+            action=action,
+            available=available,
+            capacity=self._semaphore_capacity,
+            in_use=self._semaphore_capacity - available,
+            transfer_id=transfer_id,
+        )
 
     def _submit_transfer(self, request_type, call_args):
         register_feature_id('S3_TRANSFER')
@@ -344,12 +376,14 @@ class CRTTransferManager:
                 future,
                 on_done_after_calls,
             )
-            self._semaphore.acquire()
+            self._acquire_semaphore(self._id_counter)
             # AfterDoneHandler marks all done callbacks complete, and shutdown()
             # waits on that signal. Release must run first or shutdown() can
             # observe completion while this transfer still holds its in-flight
             # semaphore slot.
-            on_done_after_calls.insert(0, self._release_semaphore)
+            on_done_after_calls.insert(
+                0, self._get_release_semaphore_callback(self._id_counter)
+            )
             crt_s3_request = self._crt_s3_client.make_request(**crt_callargs)
         except Exception as e:
             coordinator.set_exception(e, True)
@@ -722,7 +756,9 @@ class S3ClientArgsCreator:
         before_subscribers=None,
         after_subscribers=None,
     ):
-        def invoke_all_callbacks(*args, **kwargs):
+        tracer = get_current_s3_transfer_tracer()
+
+        def invoke_callbacks(*args, **kwargs):
             callbacks_list = []
             if before_subscribers is not None:
                 callbacks_list += before_subscribers
@@ -737,6 +773,13 @@ class S3ClientArgsCreator:
                     callback(bytes_transferred=args[0])
                 else:
                     callback(*args, **kwargs)
+
+        if tracer is None:
+            return invoke_callbacks
+
+        def invoke_all_callbacks(*args, **kwargs):
+            with scoped_s3_transfer_tracer(tracer):
+                invoke_callbacks(*args, **kwargs)
 
         return invoke_all_callbacks
 

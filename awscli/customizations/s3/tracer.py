@@ -224,6 +224,23 @@ class S3TransferTracer:
             'page_last_object_resumed', page_index
         )
 
+    def record_crt_semaphore_state(
+        self,
+        action,
+        capacity,
+        in_use,
+        available,
+        transfer_id=None,
+    ):
+        self._emit_event(
+            'crt_semaphore_state',
+            action=action,
+            available=available,
+            capacity=capacity,
+            in_use=in_use,
+            transfer_id=transfer_id,
+        )
+
     def _record_page_iteration_event(self, event_name, page_index):
         event = self._emit_event(
             event_name,

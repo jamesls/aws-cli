@@ -10,6 +10,7 @@
 # distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
+import json
 import threading
 from io import StringIO
 
@@ -138,6 +139,39 @@ class TestS3TransferTracer(unittest.TestCase):
         self.assertEqual(len(output_lines), 2)
         self.assertIn('list_request_start', output_lines[0])
         self.assertIn('command_summary', output_lines[1])
+
+    def test_records_crt_semaphore_state(self):
+        trace_config = parse_s3_trace_config(
+            {'AWS_CLI_S3_TRACE': 'normal,out=/tmp/trace.jsonl'}
+        )
+        tracer = S3TransferTracer(
+            trace_config=trace_config,
+            command_name='cp',
+            parameters={'src': 's3://bucket/prefix/'},
+            source_client=self.source_client,
+            output_file=self.output_file,
+            output_path='/tmp/trace.jsonl',
+            stderr=self.stderr,
+            time_fn=lambda: 0,
+        )
+
+        tracer.record_crt_semaphore_state(
+            action='acquired',
+            available=127,
+            capacity=128,
+            in_use=1,
+            transfer_id=2,
+        )
+        tracer.close()
+
+        output_lines = self.output_file.getvalue().splitlines()
+        event = json.loads(output_lines[0])
+        self.assertEqual(event['event'], 'crt_semaphore_state')
+        self.assertEqual(event['action'], 'acquired')
+        self.assertEqual(event['available'], 127)
+        self.assertEqual(event['capacity'], 128)
+        self.assertEqual(event['in_use'], 1)
+        self.assertEqual(event['transfer_id'], 2)
 
     def test_records_summary_metrics(self):
         ms = 1000000

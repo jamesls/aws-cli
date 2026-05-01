@@ -11,6 +11,7 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 import io
+import threading
 
 import pytest
 from botocore.credentials import Credentials, ReadOnlyCredentials
@@ -20,6 +21,10 @@ from s3transfer.constants import GB
 from s3transfer.exceptions import TransferNotDoneError
 from s3transfer.utils import CallArgs
 
+from awscli.customizations.s3.tracer import (
+    get_current_s3_transfer_tracer,
+    scoped_s3_transfer_tracer,
+)
 from tests import HAS_CRT, FileCreator, mock, requires_crt, unittest
 
 if HAS_CRT:
@@ -87,6 +92,85 @@ class TestCRTProcessLock:
         # The process lock should have only been instantiated and acquired once
         mock_crt_process_lock.assert_called_once_with('app-name')
         mock_crt_process_lock.return_value.acquire.assert_called_once_with()
+
+
+@requires_crt()
+class TestCRTTransferManager(unittest.TestCase):
+    def test_records_crt_semaphore_state_when_tracer_is_active(self):
+        crt_client = mock.Mock()
+        s3_request = mock.Mock()
+        s3_request.finished_future = mock.Mock()
+        crt_client.make_request.return_value = s3_request
+        request_serializer = mock.Mock()
+        request_serializer.serialize_http_request.return_value = mock.Mock()
+        manager = s3transfer.crt.CRTTransferManager(
+            crt_client, request_serializer
+        )
+        tracer = mock.Mock()
+
+        with scoped_s3_transfer_tracer(tracer):
+            manager.upload(io.BytesIO(b'content'), 'bucket', 'key')
+            on_done = crt_client.make_request.call_args[1]['on_done']
+            on_done(error=None)
+
+        tracer.record_crt_semaphore_state.assert_has_calls(
+            [
+                mock.call(
+                    action='acquired',
+                    available=127,
+                    capacity=128,
+                    in_use=1,
+                    transfer_id=0,
+                ),
+                mock.call(
+                    action='released',
+                    available=128,
+                    capacity=128,
+                    in_use=0,
+                    transfer_id=0,
+                ),
+            ]
+        )
+
+
+@requires_crt()
+class TestS3ClientArgsCreator(unittest.TestCase):
+    def test_crt_callback_restores_scoped_tracer_on_callback_thread(self):
+        creator = s3transfer.crt.S3ClientArgsCreator(
+            mock.Mock(), mock.Mock()
+        )
+        call_args = CallArgs(subscribers=[])
+        future = s3transfer.crt.CRTTransferFuture(
+            meta=s3transfer.crt.CRTTransferMeta(call_args=call_args)
+        )
+        tracer = mock.Mock()
+        observed_tracers = []
+        errors = []
+
+        def before_callback():
+            observed_tracers.append(get_current_s3_transfer_tracer())
+
+        with scoped_s3_transfer_tracer(tracer):
+            callback = creator.get_crt_callback(
+                future,
+                'done',
+                before_subscribers=[before_callback],
+            )
+
+        def invoke_callback():
+            try:
+                callback()
+                observed_tracers.append(get_current_s3_transfer_tracer())
+            except Exception as e:
+                errors.append(e)
+
+        callback_thread = threading.Thread(target=invoke_callback)
+        callback_thread.start()
+        callback_thread.join()
+
+        self.assertEqual(errors, [])
+        self.assertIs(observed_tracers[0], tracer)
+        self.assertIsNone(observed_tracers[1])
 
 
 @requires_crt()
