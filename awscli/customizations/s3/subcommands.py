@@ -35,6 +35,11 @@ from awscli.customizations.s3.fileinfo import FileInfo
 from awscli.customizations.s3.fileinfobuilder import FileInfoBuilder
 from awscli.customizations.s3.filters import create_filter
 from awscli.customizations.s3.s3handler import S3TransferHandlerFactory
+from awscli.customizations.s3.tracer import (
+    create_s3_transfer_tracer,
+    parse_s3_trace_config,
+    scoped_s3_transfer_tracer,
+)
 from awscli.customizations.s3.syncstrategy.base import (
     AlwaysSync,
     MissingFileSync,
@@ -1055,6 +1060,14 @@ class S3TransferCommand(S3Command):
         source_client, transfer_client = self._get_source_and_transfer_clients(
             params=params
         )
+        trace_config = parse_s3_trace_config()
+        tracer = create_s3_transfer_tracer(
+            trace_config=trace_config,
+            command_name=self.NAME,
+            parameters=params,
+            source_client=source_client,
+            transfer_client=transfer_client,
+        )
         transfer_manager = self._get_transfer_manager(
             params=params, botocore_transfer_client=transfer_client
         )
@@ -1067,7 +1080,12 @@ class S3TransferCommand(S3Command):
             transfer_client,
         )
         cmd.create_instructions()
-        return cmd.run()
+        try:
+            with scoped_s3_transfer_tracer(tracer):
+                return cmd.run()
+        finally:
+            if tracer is not None:
+                tracer.close()
 
     def _convert_path_args(self, parsed_args):
         if not isinstance(parsed_args.paths, list):

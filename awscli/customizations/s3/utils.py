@@ -24,6 +24,7 @@ from dateutil.tz import tzlocal, tzutc
 
 from awscli.compat import bytes_print, queue
 from awscli.customizations.exceptions import ParamValidationError
+from awscli.customizations.s3.tracer import get_current_s3_transfer_tracer
 
 LOGGER = logging.getLogger(__name__)
 HUMANIZE_SUFFIXES = ('KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')
@@ -408,6 +409,39 @@ class BucketLister:
         self._client = client
         self._date_parser = date_parser
 
+    def _record_page_available(self, page, tracer):
+        if tracer is None:
+            return None
+        return tracer.record_page_available(
+            object_count=len(page.get('Contents', [])),
+            is_truncated=page.get('IsTruncated', False),
+            next_continuation_token_present=bool(
+                page.get('NextContinuationToken')
+            ),
+        )
+
+    def _yield_page_contents(
+        self,
+        bucket,
+        contents,
+        page_index=None,
+        tracer=None,
+    ):
+        if not contents:
+            return
+        track_page = tracer is not None and page_index is not None
+        last_index = len(contents) - 1
+        for index, content in enumerate(contents):
+            source_path = bucket + '/' + content['Key']
+            content['LastModified'] = self._date_parser(
+                content['LastModified']
+            )
+            if track_page and index == 0:
+                tracer.record_page_first_object_yielded(page_index)
+            yield source_path, content
+            if track_page and index == last_index:
+                tracer.record_page_last_object_resumed(page_index)
+
     def list_objects(
         self, bucket, prefix=None, page_size=None, extra_args=None
     ):
@@ -422,14 +456,16 @@ class BucketLister:
 
         paginator = self._client.get_paginator('list_objects_v2')
         pages = paginator.paginate(**kwargs)
+        tracer = get_current_s3_transfer_tracer()
         for page in pages:
-            contents = page.get('Contents', [])
-            for content in contents:
-                source_path = bucket + '/' + content['Key']
-                content['LastModified'] = self._date_parser(
-                    content['LastModified']
-                )
-                yield source_path, content
+            page_index = self._record_page_available(page, tracer)
+            for item in self._yield_page_contents(
+                bucket=bucket,
+                contents=page.get('Contents', []),
+                page_index=page_index,
+                tracer=tracer,
+            ):
+                yield item
 
 
 class PrintTask(
