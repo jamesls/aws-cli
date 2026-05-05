@@ -70,6 +70,14 @@ class ExtraArgsSubscriber(BaseSubscriber):
         future.meta.call_args.extra_args.update(self._extra_args)
 
 
+class SizeSubscriber(BaseSubscriber):
+    def __init__(self, size):
+        self._size = size
+
+    def on_queued(self, future, **kwargs):
+        future.meta.provide_transfer_size(self._size)
+
+
 @requires_crt()
 class TestCRTTransferManager(unittest.TestCase):
     def setUp(self):
@@ -528,6 +536,46 @@ class TestCRTTransferManager(unittest.TestCase):
         with open(self.filename, 'rb') as f:
             # Check the fake response overwrites the file because of download
             self.assertEqual(f.read(), self.expected_download_content)
+
+    def test_download_with_object_size_hint(self):
+        object_size = 10
+        future = self.transfer_manager.download(
+            self.bucket,
+            self.key,
+            self.filename,
+            {},
+            [SizeSubscriber(object_size), self.record_subscriber],
+        )
+        future.result()
+
+        callargs_kwargs = self.s3_crt_client.make_request.call_args[1]
+        self.assertEqual(callargs_kwargs['object_size_hint'], object_size)
+        self._assert_expected_crt_http_request(
+            callargs_kwargs["request"],
+            expected_http_method='GET',
+            expected_content_length=0,
+        )
+        self._assert_subscribers_called(future)
+
+    def test_download_with_range_uses_object_size_hint(self):
+        object_size = 10
+        future = self.transfer_manager.download(
+            self.bucket,
+            self.key,
+            self.filename,
+            {'Range': 'bytes=0-4'},
+            [SizeSubscriber(object_size), self.record_subscriber],
+        )
+        future.result()
+
+        callargs_kwargs = self.s3_crt_client.make_request.call_args[1]
+        self.assertEqual(callargs_kwargs['object_size_hint'], object_size)
+        self._assert_expected_crt_http_request(
+            callargs_kwargs["request"],
+            expected_http_method='GET',
+            expected_content_length=0,
+        )
+        self._assert_subscribers_called(future)
 
     def test_download_to_seekable_stream(self):
         with open(self.filename, 'wb') as f:

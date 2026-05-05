@@ -405,6 +405,7 @@ class CRTTransferMeta(BaseTransferMeta):
     def __init__(self, transfer_id=None, call_args=None):
         self._transfer_id = transfer_id
         self._call_args = call_args
+        self._size = None
         self._user_context = {}
 
     @property
@@ -418,6 +419,13 @@ class CRTTransferMeta(BaseTransferMeta):
     @property
     def user_context(self):
         return self._user_context
+
+    @property
+    def size(self):
+        return self._size
+
+    def provide_transfer_size(self, size):
+        self._size = size
 
 
 class CRTTransferFuture(BaseTransferFuture):
@@ -864,6 +872,8 @@ class S3ClientArgsCreator:
         make_request_args['recv_filepath'] = recv_filepath
         make_request_args['on_body'] = on_body
         make_request_args['checksum_config'] = checksum_config
+        if future.meta.size is not None:
+            make_request_args['object_size_hint'] = future.meta.size
         return make_request_args
 
     def _default_get_make_request_args(

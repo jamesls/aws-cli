@@ -376,6 +376,14 @@ class TestBotocoreCRTCredentialsWrapper:
 
 
 @requires_crt()
+class TestCRTTransferMeta(unittest.TestCase):
+    def test_provide_transfer_size(self):
+        transfer_meta = s3transfer.crt.CRTTransferMeta()
+        transfer_meta.provide_transfer_size(10)
+        self.assertEqual(transfer_meta.size, 10)
+
+
+@requires_crt()
 class TestCRTTransferFuture(unittest.TestCase):
     def setUp(self):
         self.mock_s3_request = mock.Mock(awscrt.s3.S3RequestType)

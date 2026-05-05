@@ -107,17 +107,12 @@ class TestProvideSizeSubscriber(unittest.TestCase):
         subscriber.on_queued(self.transfer_future)
         self.assertEqual(self.transfer_meta.size, 10)
 
-    def test_does_not_try_to_set_size_on_crt_transfer_future(self):
+    def test_size_set_on_crt_transfer_future(self):
         crt_transfer_future = mock.Mock(spec=CRTTransferFuture)
         crt_transfer_future.meta = CRTTransferMeta()
         subscriber = ProvideSizeSubscriber(10)
-        try:
-            subscriber.on_queued(crt_transfer_future)
-        except AttributeError:
-            self.fail(
-                'Subscriber should not have used provide_transfer_size '
-                'method because it is not available'
-            )
+        subscriber.on_queued(crt_transfer_future)
+        self.assertEqual(crt_transfer_future.meta.size, 10)
 
 
 class TestProvideEtagSubscriber:
