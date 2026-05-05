@@ -56,7 +56,7 @@ from s3transfer.utils import CallArgs, OSUtils, get_callbacks
 logger = logging.getLogger(__name__)
 
 CRT_S3_PROCESS_LOCK = None
-CRT_TRANSFER_SEMAPHORE_CAPACITY = 128
+CRT_TRANSFER_SEMAPHORE_CAPACITY = 10000
 
 
 def acquire_crt_s3_process_lock(name):
