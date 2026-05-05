@@ -331,6 +331,16 @@ class UserAgentString:
 
         # Component that can be set with ``set_client_features()``
         self._client_features = None
+        # Frozen snapshot of ``_client_features`` used in the cache key to
+        # avoid rebuilding a frozenset on every ``to_string()`` call.
+        self._frozen_client_features = frozenset()
+
+        # Cache of built User-Agent strings keyed by the combined feature set
+        # (client-level features unioned with the current context's features).
+        # ``to_string()`` is called on every outgoing request so avoiding the
+        # ~100+ ``str.join`` calls and ~100 ``sanitize_user_agent_string_component``
+        # invocations per build is worth the small amount of bookkeeping.
+        self._ua_string_cache = {}
 
     @classmethod
     def from_environment(cls):
@@ -366,6 +376,9 @@ class UserAgentString:
         self._session_user_agent_name = session_user_agent_name
         self._session_user_agent_version = session_user_agent_version
         self._session_user_agent_extra = session_user_agent_extra
+        # Session-level inputs affect every built string, so drop any
+        # previously cached results.
+        self._ua_string_cache = {}
         return self
 
     def set_client_features(self, features):
@@ -376,6 +389,13 @@ class UserAgentString:
         :param features: A set of client-specific features.
         """
         self._client_features = features
+        self._frozen_client_features = (
+            frozenset(features) if features else frozenset()
+        )
+        # Client-level features participate in the cache key, but we also
+        # clear the cache defensively in case the previous feature set was
+        # cached under a now-stale key.
+        self._ua_string_cache = {}
 
     def with_client_config(self, client_config):
         """
@@ -386,11 +406,39 @@ class UserAgentString:
         """
         cp = copy(self)
         cp._client_config = client_config
+        # ``copy`` is shallow; give the new instance its own cache so that
+        # per-client feature sets do not collide or leak across clients.
+        cp._ua_string_cache = {}
         return cp
 
     def to_string(self):
         """
         Build User-Agent header string from the object's properties.
+
+        The built string is cached per distinct feature set (client-level
+        features unioned with the current request context's features). The
+        remaining inputs (platform info, python info, crt version, client
+        config, app id, extras) are immutable for the lifetime of a
+        ``UserAgentString`` instance; the setters that can change them clear
+        the cache.
+        """
+        ctx = get_context()
+        if ctx is None:
+            ctx_features = frozenset()
+        else:
+            ctx_features = frozenset(ctx.features)
+        cache_key = ctx_features | self._frozen_client_features
+        cached = self._ua_string_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        ua_string = self._build_ua_string()
+        self._ua_string_cache[cache_key] = ua_string
+        return ua_string
+
+    def _build_ua_string(self):
+        """
+        Build the User-Agent header string from the object's properties
+        without consulting the cache. See :py:meth:`to_string`.
         """
         config_ua_override = None
         if self._client_config:

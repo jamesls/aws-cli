@@ -226,6 +226,14 @@ class CRTTransferManager:
         self._semaphore = threading.Semaphore(self._semaphore_capacity)
         # A counter to create unique id's for each transfer submitted.
         self._id_counter = 0
+        # Register the feature ID once at manager construction instead of on
+        # every ``_submit_transfer`` call. The feature ID set is a set (so
+        # subsequent adds are no-ops) but registering it per submission still
+        # costs measurable CPU in large bulk transfers. ``register_feature_id``
+        # is a no-op outside of a botocore context, which matches the previous
+        # behavior (the CLI wraps the whole invocation in
+        # ``start_as_current_context``).
+        register_feature_id('S3_TRANSFER')
 
     def __enter__(self):
         return self
@@ -350,7 +358,6 @@ class CRTTransferManager:
         )
 
     def _submit_transfer(self, request_type, call_args):
-        register_feature_id('S3_TRANSFER')
         on_done_after_calls = []
         coordinator = CRTTransferCoordinator(
             transfer_id=self._id_counter,

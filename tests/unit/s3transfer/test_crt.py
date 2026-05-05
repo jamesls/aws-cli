@@ -132,6 +132,39 @@ class TestCRTTransferManager(unittest.TestCase):
             ]
         )
 
+    def test_register_feature_id_called_at_manager_construction(self):
+        crt_client = mock.Mock()
+        request_serializer = mock.Mock()
+        with mock.patch(
+            's3transfer.crt.register_feature_id'
+        ) as mock_register:
+            s3transfer.crt.CRTTransferManager(crt_client, request_serializer)
+        mock_register.assert_called_once_with('S3_TRANSFER')
+
+    def test_submit_transfer_does_not_reregister_feature_id(self):
+        # Regression: prior to caching/hot-path cleanup each ``_submit_transfer``
+        # call paid for a redundant ``register_feature_id('S3_TRANSFER')``.
+        # The registration should now happen exactly once, at construction.
+        crt_client = mock.Mock()
+        s3_request = mock.Mock()
+        s3_request.finished_future = mock.Mock()
+        crt_client.make_request.return_value = s3_request
+        request_serializer = mock.Mock()
+        request_serializer.serialize_http_request.return_value = mock.Mock()
+
+        with mock.patch(
+            's3transfer.crt.register_feature_id'
+        ) as mock_register:
+            manager = s3transfer.crt.CRTTransferManager(
+                crt_client, request_serializer
+            )
+            manager.upload(io.BytesIO(b'content'), 'bucket', 'key1')
+            manager.upload(io.BytesIO(b'content'), 'bucket', 'key2')
+            manager.upload(io.BytesIO(b'content'), 'bucket', 'key3')
+
+        mock_register.assert_called_once_with('S3_TRANSFER')
+
+
 
 @requires_crt()
 class TestS3ClientArgsCreator(unittest.TestCase):

@@ -13,6 +13,7 @@
 import logging
 import platform
 import unittest
+from unittest import mock
 
 import pytest
 from botocore import __version__ as botocore_version
@@ -260,3 +261,135 @@ def test_hash_in_user_agent_appid():
         'app/fooapp#1.0.0'
     )
     assert actual == expected
+
+
+def _make_ua_for_cache_tests():
+    return UserAgentString(
+        platform_name='linux',
+        platform_version='1.2.3-foo',
+        platform_machine='x86_64',
+        python_version='3.8.20',
+        python_implementation='CPython',
+        execution_env=None,
+        crt_version='Unknown',
+    ).with_client_config(Config())
+
+
+def test_to_string_caches_identical_feature_sets(client_context):
+    ua = _make_ua_for_cache_tests()
+    ua.set_client_features({'A'})
+
+    with mock.patch.object(
+        ua, '_build_ua_string', wraps=ua._build_ua_string
+    ) as build_spy:
+        first = ua.to_string()
+        second = ua.to_string()
+        third = ua.to_string()
+
+    assert first == second == third
+    # No feature set change between calls, so the build helper should run
+    # exactly once regardless of how many times to_string() is called.
+    assert build_spy.call_count == 1
+
+
+def test_to_string_rebuilds_when_context_features_change(client_context):
+    ua = _make_ua_for_cache_tests()
+    ua.set_client_features({'A'})
+
+    with mock.patch.object(
+        ua, '_build_ua_string', wraps=ua._build_ua_string
+    ) as build_spy:
+        first = ua.to_string()
+        # Registering a new feature ID mutates the current request context,
+        # which must produce a distinct cache key and force a rebuild.
+        register_feature_id('WAITER')
+        second = ua.to_string()
+        # Reverting to the original feature set should hit the cache entry
+        # populated by the first call.
+        get_context().features.discard('B')
+        third = ua.to_string()
+
+    assert first != second
+    assert first == third
+    # Two distinct feature sets observed, so two builds; the third call is a
+    # cache hit on the first entry.
+    assert build_spy.call_count == 2
+
+
+def test_cache_hits_reuse_identical_string_object(client_context):
+    ua = _make_ua_for_cache_tests()
+    first = ua.to_string()
+    second = ua.to_string()
+    # Cache hits should return the exact same string instance (not just
+    # equal) so downstream header-replace calls can short-circuit cheaply.
+    assert first is second
+
+
+def test_set_session_config_invalidates_cache(client_context):
+    ua = _make_ua_for_cache_tests()
+
+    with mock.patch.object(
+        ua, '_build_ua_string', wraps=ua._build_ua_string
+    ) as build_spy:
+        first = ua.to_string()
+        ua.set_session_config(
+            session_user_agent_name='CustomSDK',
+            session_user_agent_version='9.9.9',
+            session_user_agent_extra=None,
+        )
+        second = ua.to_string()
+
+    assert 'CustomSDK/9.9.9' in second
+    assert 'CustomSDK/9.9.9' not in first
+    assert build_spy.call_count == 2
+
+
+def test_set_client_features_invalidates_cache(client_context):
+    ua = _make_ua_for_cache_tests()
+    ua.set_client_features({'A'})
+
+    with mock.patch.object(
+        ua, '_build_ua_string', wraps=ua._build_ua_string
+    ) as build_spy:
+        first = ua.to_string()
+        ua.set_client_features({'A', 'B'})
+        second = ua.to_string()
+
+    assert first != second
+    assert build_spy.call_count == 2
+
+
+def test_with_client_config_gives_each_copy_its_own_cache(client_context):
+    base = UserAgentString(
+        platform_name='linux',
+        platform_version='1.2.3-foo',
+        platform_machine='x86_64',
+        python_version='3.8.20',
+        python_implementation='CPython',
+        execution_env=None,
+        crt_version='Unknown',
+    )
+    child_a = base.with_client_config(Config(user_agent_appid='app-a'))
+    child_b = base.with_client_config(Config(user_agent_appid='app-b'))
+
+    str_a = child_a.to_string()
+    str_b = child_b.to_string()
+
+    assert 'app/app-a' in str_a
+    assert 'app/app-b' in str_b
+    # Shallow-copy hazard: mutating one copy's cache must not leak into the
+    # other or back into the shared base.
+    assert child_a._ua_string_cache is not child_b._ua_string_cache
+    assert child_a._ua_string_cache is not base._ua_string_cache
+
+
+def test_cached_string_matches_build_output_exactly(client_context):
+    ua = _make_ua_for_cache_tests()
+    ua.set_client_features({'A'})
+    register_feature_id('WAITER')
+
+    cached = ua.to_string()
+    # Bypass the cache to build a fresh string and compare.
+    fresh = ua._build_ua_string()
+
+    assert cached == fresh
