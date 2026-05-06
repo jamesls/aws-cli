@@ -855,16 +855,16 @@ class S3ClientArgsCreator:
         on_done_after_calls,
     ):
         recv_filepath = None
+        recv_final_filepath = None
+        recv_file_delete_on_failure = False
         on_body = None
         checksum_config = awscrt.s3.S3ChecksumConfig(validate_response=True)
         if isinstance(call_args.fileobj, str):
-            final_filepath = call_args.fileobj
-            recv_filepath = self._os_utils.get_temp_filename(final_filepath)
-            on_done_before_calls.append(
-                RenameTempFileHandler(
-                    coordinator, final_filepath, recv_filepath, self._os_utils
-                )
+            recv_final_filepath = call_args.fileobj
+            recv_filepath = self._os_utils.get_temp_filename(
+                recv_final_filepath
             )
+            recv_file_delete_on_failure = True
         else:
             on_body = OnBodyFileObjWriter(call_args.fileobj)
 
@@ -877,6 +877,10 @@ class S3ClientArgsCreator:
             on_done_after_calls=on_done_after_calls,
         )
         make_request_args['recv_filepath'] = recv_filepath
+        make_request_args['recv_final_filepath'] = recv_final_filepath
+        make_request_args['recv_file_delete_on_failure'] = (
+            recv_file_delete_on_failure
+        )
         make_request_args['on_body'] = on_body
         make_request_args['checksum_config'] = checksum_config
         if future.meta.size is not None:
@@ -936,28 +940,6 @@ class S3ClientArgsCreator:
                 should_normalize_uri_path=False,
             )
         return make_request_args
-
-
-class RenameTempFileHandler:
-    def __init__(self, coordinator, final_filename, temp_filename, osutil):
-        self._coordinator = coordinator
-        self._final_filename = final_filename
-        self._temp_filename = temp_filename
-        self._osutil = osutil
-
-    def __call__(self, **kwargs):
-        error = kwargs['error']
-        if error:
-            self._osutil.remove_file(self._temp_filename)
-        else:
-            try:
-                self._osutil.rename_file(
-                    self._temp_filename, self._final_filename
-                )
-            except Exception as e:
-                self._osutil.remove_file(self._temp_filename)
-                # the CRT future has done already at this point
-                self._coordinator.set_exception(e)
 
 
 class AfterDoneHandler:
